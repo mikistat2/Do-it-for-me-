@@ -1,6 +1,6 @@
 import { Job, Profile } from '@prisma/client';
 import { z } from 'zod';
-import { geminiClient } from './gemini.client';
+import { hfClient } from './hf.client';
 import { logService } from '../services/log.service';
 import { LogCategory } from '@prisma/client';
 
@@ -37,10 +37,9 @@ export const emailGenerationService = {
     await logService.info(LogCategory.AI, 'Generating application email', {
       jobId: job.id,
     });
-    const result = await geminiClient.generateJson<unknown>({
+    const result = await hfClient.generateJson<unknown>({
       prompt: buildPrompt(job, profile),
       systemInstruction: SYSTEM_INSTRUCTION,
-      temperature: 0.6,
     });
     return emailSchema.parse(result);
   },

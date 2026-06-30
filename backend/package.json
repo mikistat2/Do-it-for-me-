@@ -25,6 +25,7 @@
     "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
+    "@huggingface/inference": "^4.13.21",
     "@prisma/client": "^5.22.0",
     "axios": "^1.7.7",
     "bcrypt": "^5.1.1",

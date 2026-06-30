@@ -36,12 +36,8 @@ export const config = {
     reconnectRetries: env.TELEGRAM_RECONNECT_RETRIES,
     reconnectDelayMs: env.TELEGRAM_RECONNECT_DELAY_MS,
   },
-  gemini: {
-    apiKey: env.GEMINI_API_KEY,
-    model: env.GEMINI_MODEL,
-    baseUrl: env.GEMINI_BASE_URL,
-    maxRetries: env.GEMINI_MAX_RETRIES,
-    retryDelayMs: env.GEMINI_RETRY_DELAY_MS,
+  hf: {
+    token: env.HF_TOKEN,
   },
   email: {
     host: env.SMTP_HOST,

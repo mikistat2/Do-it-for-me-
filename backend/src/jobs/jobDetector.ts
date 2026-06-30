@@ -42,6 +42,8 @@ const JOB_KEYWORDS = [
   'ደሞዝ',
   'የስራ ማስታወቂያ',
   'ክፍት የስራ ቦታ',
+  'ስራ opportunities',
+  'opportunity',
 ];
 
 const SKILL_DICTIONARY = [

@@ -37,13 +37,7 @@ const envSchema = z.object({
   TELEGRAM_RECONNECT_RETRIES: z.coerce.number().int().default(10),
   TELEGRAM_RECONNECT_DELAY_MS: z.coerce.number().int().default(5000),
 
-  GEMINI_API_KEY: z.string().default(''),
-  GEMINI_MODEL: z.string().default('gemini-1.5-flash'),
-  GEMINI_BASE_URL: z
-    .string()
-    .default('https://generativelanguage.googleapis.com/v1beta'),
-  GEMINI_MAX_RETRIES: z.coerce.number().int().default(3),
-  GEMINI_RETRY_DELAY_MS: z.coerce.number().int().default(2000),
+  HF_TOKEN: z.string().default(''),
 
   SMTP_HOST: z.string().default('localhost'),
   SMTP_PORT: z.coerce.number().int().default(587),

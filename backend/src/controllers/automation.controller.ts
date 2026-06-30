@@ -23,7 +23,7 @@ export const automationController = {
       autoApply: settings.autoApply,
       matchThreshold: settings.matchThreshold,
       telegramConfigured: isTelegramConfigured(),
-      geminiConfigured: Boolean(config.gemini.apiKey),
+      hfConfigured: Boolean(config.hf.token),
     };
 
     sendSuccess(res, automationStatus);
