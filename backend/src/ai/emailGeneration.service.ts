@@ -14,7 +14,8 @@ export type GeneratedEmail = z.infer<typeof emailSchema>;
 const SYSTEM_INSTRUCTION = `You write professional, personalized job application emails.
 Return a strict JSON object with keys "subject" and "body".
 The body must be professional, concise, reference the candidate's portfolio,
-skills, and relevant experience, and be ready to send. Return JSON only.`;
+skills, and relevant experience, and be ready to send.
+CRITICAL: You must return valid JSON. Do NOT use literal newlines in the string values. Use \\n instead.`;
 
 const buildPrompt = (job: Job, profile: Profile): string =>
   `Write a job application email.\n\n` +

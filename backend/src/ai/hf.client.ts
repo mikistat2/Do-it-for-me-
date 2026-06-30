@@ -68,7 +68,23 @@ export const parseJsonResponse = <T>(raw: string): T => {
   const end = cleaned.lastIndexOf('}');
   const candidate =
     start >= 0 && end >= start ? cleaned.slice(start, end + 1) : cleaned;
-  return JSON.parse(candidate) as T;
+  
+  try {
+    return JSON.parse(candidate) as T;
+  } catch (error) {
+    // If JSON.parse fails, it is often due to unescaped literal newlines in the generated strings.
+    // We attempt to sanitize it by replacing literal newlines with escaped \n, 
+    // but only when they are not already escaped.
+    const sanitized = candidate
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '');
+    try {
+      return JSON.parse(sanitized) as T;
+    } catch (fallbackError) {
+      // If it STILL fails, it might be that replacing ALL newlines broke the JSON structure.
+      throw error;
+    }
+  }
 };
 
 export const hfClient = new HfClient();
