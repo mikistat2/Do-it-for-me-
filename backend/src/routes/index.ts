@@ -9,6 +9,7 @@ import applicationRoutes from './application.routes';
 import notificationRoutes from './notification.routes';
 import logRoutes from './log.routes';
 import dashboardRoutes from './dashboard.routes';
+import automationRoutes from './automation.routes';
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/applications', applicationRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/logs', logRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/automation', automationRoutes);
 
 export default router;

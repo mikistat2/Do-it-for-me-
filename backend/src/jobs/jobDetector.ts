@@ -34,6 +34,14 @@ const JOB_KEYWORDS = [
   'part-time',
   'remote',
   'internship',
+  'የስራው መጠሪያ',
+  'የስራ አይነት',
+  'የስራ ቦታ',
+  'ተፈላጊ ችሎታ',
+  'የስራ ልምድ',
+  'ደሞዝ',
+  'የስራ ማስታወቂያ',
+  'ክፍት የስራ ቦታ',
 ];
 
 const SKILL_DICTIONARY = [
@@ -83,15 +91,15 @@ const SKILL_DICTIONARY = [
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 const PHONE_REGEX = /(\+?\d[\d\s().-]{7,}\d)/;
 const SALARY_REGEX =
-  /(?:salary|compensation|pay)\s*[:\-]?\s*([^\n]+)|(\$\s?\d[\d,]*(?:\s?-\s?\$?\d[\d,]*)?(?:\s?(?:k|usd|per month|\/month|\/year))?)/i;
+  /(?:salary|compensation|pay|ደሞዝ)\s*[:\-]?\s*([^\n]+)|(\$\s?\d[\d,]*(?:\s?-\s?\$?\d[\d,]*)?(?:\s?(?:k|usd|per month|\/month|\/year))?)/i;
 const EXPERIENCE_REGEX =
-  /(\d+\+?\s*(?:-\s*\d+\s*)?(?:years?|yrs?))\s*(?:of\s*)?(?:experience)?/i;
+  /(\d+\+?\s*(?:-\s*\d+\s*)?(?:years?|yrs?|ዓመት|ዓመታት))\s*(?:of\s*)?(?:experience|ልምድ)?/i;
 const TITLE_REGEX =
-  /(?:position|role|title|hiring(?:\s+for)?|we(?:'re| are) looking for(?: an?)?)\s*[:\-]?\s*([A-Za-z0-9+#./ ]{3,60})/i;
+  /(?:position|role|title|hiring(?:\s+for)?|we(?:'re| are) looking for(?: an?)?|የስራው መጠሪያ)\s*[:\-]?\s*([^\n]{3,60})/i;
 const COMPANY_REGEX =
-  /(?:company|at|@)\s*[:\-]?\s*([A-Z][A-Za-z0-9&.\- ]{1,50})/;
+  /(?:company|at|@|ድርጅት|ቀጣሪ)\s*[:\-]?\s*([^\n]{1,50})/;
 const DEADLINE_REGEX =
-  /(?:deadline|apply before|closing date|last date)\s*[:\-]?\s*([0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}|[A-Za-z]+\s+[0-9]{1,2}(?:,?\s*[0-9]{4})?)/i;
+  /(?:deadline|apply before|closing date|last date|ማመልከቻ ማብቂያ)\s*[:\-]?\s*([0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}|[A-Za-z]+\s+[0-9]{1,2}(?:,?\s*[0-9]{4})?)/i;
 
 const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim();
 

@@ -22,6 +22,7 @@ export interface GenerateOptions {
   systemInstruction?: string;
   temperature?: number;
   expectJson?: boolean;
+  schema?: any;
 }
 
 class GeminiClient {
@@ -57,6 +58,9 @@ class GeminiClient {
         temperature: options.temperature ?? 0.4,
         ...(options.expectJson
           ? { responseMimeType: 'application/json' }
+          : {}),
+        ...(options.schema
+          ? { responseSchema: options.schema }
           : {}),
       },
     };

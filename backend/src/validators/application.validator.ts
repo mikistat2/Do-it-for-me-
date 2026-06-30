@@ -13,9 +13,9 @@ export const applicationIdSchema = z.object({ params: idParam });
 export const manualSendSchema = z.object({
   body: z.object({
     jobId: z.string().uuid(),
-    toEmail: z.string().trim().toLowerCase().email(),
-    subject: z.string().trim().min(1).max(255),
-    body: z.string().trim().min(1).max(20000),
+    toEmail: z.string().trim().toLowerCase().email().optional(),
+    subject: z.string().trim().min(1).max(255).optional(),
+    body: z.string().trim().min(1).max(20000).optional(),
   }),
 });
 

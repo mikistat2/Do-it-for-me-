@@ -53,6 +53,17 @@ export const matchingService = {
       prompt: buildPrompt(job, profile, jobSkills),
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.2,
+      schema: {
+        type: 'OBJECT',
+        properties: {
+          score: { type: 'INTEGER' },
+          strengths: { type: 'ARRAY', items: { type: 'STRING' } },
+          weaknesses: { type: 'ARRAY', items: { type: 'STRING' } },
+          reason: { type: 'STRING' },
+          recommendation: { type: 'STRING', enum: ['STRONG_APPLY', 'APPLY', 'CONSIDER', 'SKIP'] },
+        },
+        required: ['score', 'strengths', 'weaknesses', 'reason', 'recommendation'],
+      },
     });
     const parsed = matchResultSchema.parse(result);
     return { ...parsed, score: Math.round(parsed.score) };

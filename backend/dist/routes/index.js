@@ -14,6 +14,7 @@ const application_routes_1 = __importDefault(require("./application.routes"));
 const notification_routes_1 = __importDefault(require("./notification.routes"));
 const log_routes_1 = __importDefault(require("./log.routes"));
 const dashboard_routes_1 = __importDefault(require("./dashboard.routes"));
+const automation_routes_1 = __importDefault(require("./automation.routes"));
 const router = (0, express_1.Router)();
 router.use('/auth', auth_routes_1.default);
 router.use('/profile', profile_routes_1.default);
@@ -25,5 +26,6 @@ router.use('/applications', application_routes_1.default);
 router.use('/notifications', notification_routes_1.default);
 router.use('/logs', log_routes_1.default);
 router.use('/dashboard', dashboard_routes_1.default);
+router.use('/automation', automation_routes_1.default);
 exports.default = router;
 //# sourceMappingURL=index.js.map

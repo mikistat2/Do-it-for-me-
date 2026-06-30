@@ -39,13 +39,14 @@ export const applicationController = {
 
   async manualSend(req: AuthenticatedRequest, res: Response): Promise<void> {
     const userId = requireUserId(req);
-    const result = await applicationService.dispatch({
-      userId,
-      jobId: req.body.jobId,
-      toEmail: req.body.toEmail,
-      subject: req.body.subject,
-      body: req.body.body,
-    });
+    const { jobId, toEmail, subject, body } = req.body;
+
+    // If full payload is provided, dispatch directly; otherwise auto-generate
+    const result =
+      toEmail && subject && body
+        ? await applicationService.dispatch({ userId, jobId, toEmail, subject, body })
+        : await applicationService.sendFromJob(userId, jobId);
+
     sendCreated(res, result);
   },
 

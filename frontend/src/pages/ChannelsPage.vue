@@ -27,8 +27,14 @@
           ></span>
         </div>
         
-        <div class="text-xs text-slate-500">
-          Last message: <span v-text="channel.lastMessageAt ? new Date(channel.lastMessageAt).toLocaleString() : 'Never'"></span>
+        <div class="flex items-center gap-1 text-xs">
+          <span class="text-slate-500">Last message:</span>
+          <span
+            v-if="channel.lastMessageAt"
+            :class="isRecent(channel.lastMessageAt) ? 'text-emerald-600 font-medium' : 'text-rose-600 font-medium'"
+            v-text="new Date(channel.lastMessageAt).toLocaleString()"
+          ></span>
+          <span v-else class="text-rose-600 font-medium">Never</span>
         </div>
 
         <div class="mt-2 flex items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
@@ -103,6 +109,14 @@ const channels = ref<TelegramChannel[]>([]);
 const showModal = ref(false);
 const newChannelId = ref('');
 const newChannelTitle = ref('');
+
+const isRecent = (dateStr: string | null | undefined): boolean => {
+  if (!dateStr) return false;
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+  return diffInHours < 24;
+};
 
 const load = async () => {
   loading.value = true;

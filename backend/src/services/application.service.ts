@@ -11,11 +11,14 @@ import {
 import { draftRepository } from '../repositories/draft.repository';
 import { jobRepository } from '../repositories/job.repository';
 import { emailService } from '../email/email.service';
+import { isSmtpConfigured } from '../email/mailer';
 import { notificationService } from './notification.service';
 import { logService } from './log.service';
 import { buildPaginatedResult, resolvePagination } from '../utils/pagination';
 import { BadRequestError, ConflictError, NotFoundError } from '../utils/errors';
 import { isValidEmail } from '../jobs/decisionRules';
+import { profileRepository } from '../repositories/profile.repository';
+import { emailGenerationService } from '../ai/emailGeneration.service';
 import { LogCategory } from '@prisma/client';
 
 export interface DispatchResult {
@@ -51,6 +54,11 @@ export const applicationService = {
     body: string;
     draftId?: string | null;
   }): Promise<DispatchResult> {
+    if (!isSmtpConfigured()) {
+      throw new BadRequestError(
+        'SMTP is not configured. Set SMTP_USER and SMTP_PASSWORD in your .env file.',
+      );
+    }
     if (!isValidEmail(params.toEmail)) {
       throw new BadRequestError('A valid recipient email is required');
     }
@@ -128,6 +136,36 @@ export const applicationService = {
       subject: draft.subject,
       body: draft.body,
       draftId: draft.id,
+    });
+  },
+
+  /**
+   * "Smart" send from a job ID only. Looks up the job's contact email,
+   * fetches the user profile, generates email content via AI, then dispatches.
+   */
+  async sendFromJob(userId: string, jobId: string): Promise<DispatchResult> {
+    const job = await jobRepository.findById(userId, jobId);
+    if (!job) {
+      throw new NotFoundError('Job not found');
+    }
+    if (!isValidEmail(job.contactEmail)) {
+      throw new BadRequestError(
+        'This job has no valid contact email. Add one before sending.',
+      );
+    }
+    const profile = await profileRepository.findByUserId(userId);
+    if (!profile) {
+      throw new BadRequestError(
+        'Complete your profile before sending applications.',
+      );
+    }
+    const email = await emailGenerationService.generate(job, profile);
+    return this.dispatch({
+      userId,
+      jobId,
+      toEmail: job.contactEmail,
+      subject: email.subject,
+      body: email.body,
     });
   },
 };

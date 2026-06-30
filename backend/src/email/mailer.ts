@@ -31,5 +31,8 @@ export const verifyTransporter = async (): Promise<boolean> => {
   }
 };
 
+export const isSmtpConfigured = (): boolean =>
+  Boolean(config.email.user && config.email.password);
+
 export const fromAddress = (): string =>
   `"${config.email.fromName}" <${config.email.fromEmail || config.email.user}>`;
