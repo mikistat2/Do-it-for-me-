@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.emailGenerationService = void 0;
 const zod_1 = require("zod");
-const gemini_client_1 = require("./gemini.client");
+const hf_client_1 = require("./hf.client");
 const log_service_1 = require("../services/log.service");
 const client_1 = require("@prisma/client");
 const emailSchema = zod_1.z.object({
@@ -12,7 +12,8 @@ const emailSchema = zod_1.z.object({
 const SYSTEM_INSTRUCTION = `You write professional, personalized job application emails.
 Return a strict JSON object with keys "subject" and "body".
 The body must be professional, concise, reference the candidate's portfolio,
-skills, and relevant experience, and be ready to send. Return JSON only.`;
+skills, and relevant experience, and be ready to send.
+CRITICAL: You must return valid JSON. Do NOT use literal newlines in the string values. Use \\n instead.`;
 const buildPrompt = (job, profile) => `Write a job application email.\n\n` +
     `CANDIDATE\n` +
     `Name: ${profile.fullName}\n` +
@@ -32,10 +33,9 @@ exports.emailGenerationService = {
         await log_service_1.logService.info(client_1.LogCategory.AI, 'Generating application email', {
             jobId: job.id,
         });
-        const result = await gemini_client_1.geminiClient.generateJson({
+        const result = await hf_client_1.hfClient.generateJson({
             prompt: buildPrompt(job, profile),
             systemInstruction: SYSTEM_INSTRUCTION,
-            temperature: 0.6,
         });
         return emailSchema.parse(result);
     },

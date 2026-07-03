@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fromAddress = exports.verifyTransporter = exports.getTransporter = void 0;
+exports.fromAddress = exports.isSmtpConfigured = exports.verifyTransporter = exports.getTransporter = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const config_1 = require("../config");
 const logger_1 = require("../utils/logger");
@@ -35,6 +35,8 @@ const verifyTransporter = async () => {
     }
 };
 exports.verifyTransporter = verifyTransporter;
+const isSmtpConfigured = () => Boolean(config_1.config.email.user && config_1.config.email.password);
+exports.isSmtpConfigured = isSmtpConfigured;
 const fromAddress = () => `"${config_1.config.email.fromName}" <${config_1.config.email.fromEmail || config_1.config.email.user}>`;
 exports.fromAddress = fromAddress;
 //# sourceMappingURL=mailer.js.map

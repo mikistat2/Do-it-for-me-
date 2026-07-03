@@ -6,11 +6,14 @@ const application_repository_1 = require("../repositories/application.repository
 const draft_repository_1 = require("../repositories/draft.repository");
 const job_repository_1 = require("../repositories/job.repository");
 const email_service_1 = require("../email/email.service");
+const mailer_1 = require("../email/mailer");
 const notification_service_1 = require("./notification.service");
 const log_service_1 = require("./log.service");
 const pagination_1 = require("../utils/pagination");
 const errors_1 = require("../utils/errors");
 const decisionRules_1 = require("../jobs/decisionRules");
+const profile_repository_1 = require("../repositories/profile.repository");
+const emailGeneration_service_1 = require("../ai/emailGeneration.service");
 const client_2 = require("@prisma/client");
 exports.applicationService = {
     async list(filter, page, pageSize) {
@@ -31,6 +34,9 @@ exports.applicationService = {
      * notifications and logs.
      */
     async dispatch(params) {
+        if (!(0, mailer_1.isSmtpConfigured)()) {
+            throw new errors_1.BadRequestError('SMTP is not configured. Set SMTP_USER and SMTP_PASSWORD in your .env file.');
+        }
         if (!(0, decisionRules_1.isValidEmail)(params.toEmail)) {
             throw new errors_1.BadRequestError('A valid recipient email is required');
         }
@@ -101,6 +107,31 @@ exports.applicationService = {
             subject: draft.subject,
             body: draft.body,
             draftId: draft.id,
+        });
+    },
+    /**
+     * "Smart" send from a job ID only. Looks up the job's contact email,
+     * fetches the user profile, generates email content via AI, then dispatches.
+     */
+    async sendFromJob(userId, jobId) {
+        const job = await job_repository_1.jobRepository.findById(userId, jobId);
+        if (!job) {
+            throw new errors_1.NotFoundError('Job not found');
+        }
+        if (!(0, decisionRules_1.isValidEmail)(job.contactEmail)) {
+            throw new errors_1.BadRequestError('This job has no valid contact email. Add one before sending.');
+        }
+        const profile = await profile_repository_1.profileRepository.findByUserId(userId);
+        if (!profile) {
+            throw new errors_1.BadRequestError('Complete your profile before sending applications.');
+        }
+        const email = await emailGeneration_service_1.emailGenerationService.generate(job, profile);
+        return this.dispatch({
+            userId,
+            jobId,
+            toEmail: job.contactEmail,
+            subject: email.subject,
+            body: email.body,
         });
     },
 };

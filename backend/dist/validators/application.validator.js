@@ -13,9 +13,9 @@ exports.applicationIdSchema = zod_1.z.object({ params: common_validator_1.idPara
 exports.manualSendSchema = zod_1.z.object({
     body: zod_1.z.object({
         jobId: zod_1.z.string().uuid(),
-        toEmail: zod_1.z.string().trim().toLowerCase().email(),
-        subject: zod_1.z.string().trim().min(1).max(255),
-        body: zod_1.z.string().trim().min(1).max(20000),
+        toEmail: zod_1.z.string().trim().toLowerCase().email().optional(),
+        subject: zod_1.z.string().trim().min(1).max(255).optional(),
+        body: zod_1.z.string().trim().min(1).max(20000).optional(),
     }),
 });
 //# sourceMappingURL=application.validator.js.map

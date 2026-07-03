@@ -21,7 +21,7 @@ exports.automationController = {
             autoApply: settings.autoApply,
             matchThreshold: settings.matchThreshold,
             telegramConfigured: (0, telegramClient_1.isTelegramConfigured)(),
-            geminiConfigured: Boolean(config_1.config.gemini.apiKey),
+            hfConfigured: Boolean(config_1.config.hf.token),
         };
         (0, http_1.sendSuccess)(res, automationStatus);
     },

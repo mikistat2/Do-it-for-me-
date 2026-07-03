@@ -35,15 +35,21 @@ const JOB_KEYWORDS = [
   'remote',
   'internship',
   'የስራው መጠሪያ',
+  'የስራው አይነት',
   'የስራ አይነት',
+  'የስራው ቦታ',
   'የስራ ቦታ',
   'ተፈላጊ ችሎታ',
   'የስራ ልምድ',
   'ደሞዝ',
   'የስራ ማስታወቂያ',
   'ክፍት የስራ ቦታ',
+  'የስራው ዝርዝር',
   'ስራ opportunities',
   'opportunity',
+  '@freelance_ethio',
+  'afriwork',
+  'afriworket',
 ];
 
 const SKILL_DICTIONARY = [
@@ -101,7 +107,7 @@ const TITLE_REGEX =
 const COMPANY_REGEX =
   /(?:company|at|@|ድርጅት|ቀጣሪ)\s*[:\-]?\s*([^\n]{1,50})/;
 const DEADLINE_REGEX =
-  /(?:deadline|apply before|closing date|last date|ማመልከቻ ማብቂያ)\s*[:\-]?\s*([0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}|[A-Za-z]+\s+[0-9]{1,2}(?:,?\s*[0-9]{4})?)/i;
+  /(?:deadline|apply before|closing date|last date|ማመልከቻ ማብቂያ(?: ቀን)?)\s*[:\-]?\s*([0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}|[A-Za-z]+\s+[0-9]{1,2}(?:,?\s*[0-9]{4})?)/i;
 
 const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim();
 

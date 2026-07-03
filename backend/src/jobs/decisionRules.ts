@@ -30,9 +30,6 @@ export const decideApplicationAction = (ctx: DecisionContext): Decision => {
   if (ctx.isDuplicateApplication) {
     return { action: 'SKIP', reason: 'An application already exists for this job' };
   }
-  if (!isValidEmail(ctx.contactEmail)) {
-    return { action: 'SKIP', reason: 'No valid contact email was found' };
-  }
   if (ctx.score < threshold) {
     return {
       action: 'SKIP',
@@ -41,6 +38,9 @@ export const decideApplicationAction = (ctx: DecisionContext): Decision => {
   }
 
   if (ctx.settings.autoApply && !ctx.settings.automationPaused) {
+    if (!isValidEmail(ctx.contactEmail)) {
+      return { action: 'DRAFT_ONLY', reason: 'Score meets threshold but no valid email found for auto-apply' };
+    }
     return { action: 'AUTO_APPLY', reason: 'Score meets threshold and automation is active' };
   }
 

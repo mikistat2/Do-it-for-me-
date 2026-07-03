@@ -28,13 +28,11 @@ exports.applicationController = {
     },
     async manualSend(req, res) {
         const userId = requireUserId(req);
-        const result = await application_service_1.applicationService.dispatch({
-            userId,
-            jobId: req.body.jobId,
-            toEmail: req.body.toEmail,
-            subject: req.body.subject,
-            body: req.body.body,
-        });
+        const { jobId, toEmail, subject, body } = req.body;
+        // If full payload is provided, dispatch directly; otherwise auto-generate
+        const result = toEmail && subject && body
+            ? await application_service_1.applicationService.dispatch({ userId, jobId, toEmail, subject, body })
+            : await application_service_1.applicationService.sendFromJob(userId, jobId);
         (0, http_1.sendCreated)(res, result);
     },
     async approveDraft(req, res) {

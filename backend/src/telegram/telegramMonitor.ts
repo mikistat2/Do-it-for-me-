@@ -12,6 +12,7 @@ const RECONNECT_CHECK_INTERVAL_MS = 30000;
 
 let running = false;
 let reconnectTimer: NodeJS.Timeout | null = null;
+let syncTimer: NodeJS.Timeout | null = null;
 let handler: ((event: NewMessageEvent) => Promise<void>) | null = null;
 
 const resolveChatId = (event: NewMessageEvent): string | null => {
@@ -38,6 +39,10 @@ const buildHandler =
         return;
       }
       const chatId = resolveChatId(event);
+      
+  
+      logger.info({ chatId, peerId: event.message.peerId }, 'Incoming Telegram Message Peer Info');
+
       if (!chatId) {
         return;
       }
@@ -109,6 +114,31 @@ export const startTelegramMonitor = async (): Promise<void> => {
   reconnectTimer = setInterval(() => {
     void ensureConnection();
   }, RECONNECT_CHECK_INTERVAL_MS);
+
+  // Background polling to ensure we never miss messages from channels
+  // GramJS NewMessage events can be flaky for muted or large public channels on user accounts.
+  syncTimer = setInterval(() => {
+    void syncAllActiveChannels();
+  }, 2 * 60 * 1000); // Every 2 minutes
+};
+
+const syncAllActiveChannels = async () => {
+  if (!isTelegramConfigured()) return;
+  try {
+    const activeChannels = await prisma.telegramChannel.findMany({
+      where: { status: 'ACTIVE' },
+    });
+    for (const channel of activeChannels) {
+      try {
+        const entity = channel.username ? channel.username : channel.channelId;
+        await fetchChannelHistory(channel.id, channel.userId, entity, 10);
+      } catch (e) {
+        logger.warn({ error: e, channelId: channel.id }, 'Failed to sync channel in background');
+      }
+    }
+  } catch (e) {
+    logger.error({ error: e }, 'Failed to run background channel sync');
+  }
 };
 
 export const stopTelegramMonitor = async (): Promise<void> => {
@@ -116,6 +146,10 @@ export const stopTelegramMonitor = async (): Promise<void> => {
   if (reconnectTimer) {
     clearInterval(reconnectTimer);
     reconnectTimer = null;
+  }
+  if (syncTimer) {
+    clearInterval(syncTimer);
+    syncTimer = null;
   }
   handler = null;
   await logService.warn(LogCategory.SYSTEM, 'Telegram monitor stopped');

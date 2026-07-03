@@ -34,13 +34,7 @@ const envSchema = zod_1.z.object({
     TELEGRAM_SESSION: zod_1.z.string().default(''),
     TELEGRAM_RECONNECT_RETRIES: zod_1.z.coerce.number().int().default(10),
     TELEGRAM_RECONNECT_DELAY_MS: zod_1.z.coerce.number().int().default(5000),
-    GEMINI_API_KEY: zod_1.z.string().default(''),
-    GEMINI_MODEL: zod_1.z.string().default('gemini-1.5-flash'),
-    GEMINI_BASE_URL: zod_1.z
-        .string()
-        .default('https://generativelanguage.googleapis.com/v1beta'),
-    GEMINI_MAX_RETRIES: zod_1.z.coerce.number().int().default(3),
-    GEMINI_RETRY_DELAY_MS: zod_1.z.coerce.number().int().default(2000),
+    HF_TOKEN: zod_1.z.string().default(''),
     SMTP_HOST: zod_1.z.string().default('localhost'),
     SMTP_PORT: zod_1.z.coerce.number().int().default(587),
     SMTP_SECURE: booleanString.default('false'),
