@@ -1,4 +1,4 @@
-import { http } from './client';
+import { http, telegramHttp } from './client';
 import type {
   ApiEnvelope,
   Application,
@@ -15,6 +15,8 @@ import type {
   Settings,
   StatisticsResponse,
   TelegramChannel,
+  TelegramSendCodeResponse,
+  TelegramVerifyResponse,
 } from '@/types';
 
 const unwrap = <T>(envelope: ApiEnvelope<T>): T => envelope.data;
@@ -47,10 +49,55 @@ export const authApi = {
     email: string,
     password: string,
     fullName: string,
-  ): Promise<AuthResponse> {
-    const { data } = await http.post<ApiEnvelope<AuthResponse>>(
-      '/auth/register',
-      { email, password, fullName },
+    registrationToken: string,
+    code: string,
+    telegramPassword?: string,
+  ): Promise<AuthResponse | TelegramVerifyResponse> {
+    const { data } = await telegramHttp.post<
+      ApiEnvelope<AuthResponse | TelegramVerifyResponse>
+    >('/auth/register', {
+      email,
+      password,
+      fullName,
+      registrationToken,
+      code,
+      telegramPassword,
+    });
+
+    const payload = unwrap(data);
+    if ((payload as TelegramVerifyResponse).status === 'needs_2fa') {
+      return payload as TelegramVerifyResponse;
+    }
+    return payload as AuthResponse;
+  },
+  async sendTelegramCode(
+    phone: string,
+    registrationToken?: string,
+  ): Promise<TelegramSendCodeResponse> {
+    const { data } = await telegramHttp.post<ApiEnvelope<TelegramSendCodeResponse>>(
+      '/auth/telegram/send-code',
+      { phone, registrationToken },
+    );
+    return unwrap(data);
+  },
+  async verifyTelegramCode(
+    registrationToken: string,
+    code: string,
+    password?: string,
+  ): Promise<TelegramVerifyResponse> {
+    const { data } = await http.post<ApiEnvelope<TelegramVerifyResponse>>(
+      '/auth/telegram/verify',
+      { registrationToken, code, password },
+    );
+    return unwrap(data);
+  },
+  async verifyTelegram2fa(
+    registrationToken: string,
+    password: string,
+  ): Promise<TelegramVerifyResponse> {
+    const { data } = await http.post<ApiEnvelope<TelegramVerifyResponse>>(
+      '/auth/telegram/verify-2fa',
+      { registrationToken, password },
     );
     return unwrap(data);
   },
@@ -121,6 +168,12 @@ export const channelApi = {
   async remove(id: string): Promise<void> {
     await http.delete(`/channels/${id}`);
   },
+  async sync(id: string): Promise<{ processed: number; jobs: number }> {
+    const { data } = await http.post<ApiEnvelope<{ processed: number; jobs: number }>>(
+      `/channels/${id}/sync`,
+    );
+    return unwrap(data);
+  },
 };
 
 export const jobApi = {
@@ -170,6 +223,12 @@ export const draftApi = {
   async reject(id: string): Promise<ApplicationDraft> {
     const { data } = await http.post<ApiEnvelope<ApplicationDraft>>(
       `/drafts/${id}/reject`,
+    );
+    return unwrap(data);
+  },
+  async regenerate(id: string): Promise<ApplicationDraft> {
+    const { data } = await http.post<ApiEnvelope<ApplicationDraft>>(
+      `/drafts/${id}/regenerate`,
     );
     return unwrap(data);
   },

@@ -5,7 +5,23 @@ export interface ApiUser {
   email: string;
   role: UserRole;
   isActive: boolean;
+  telegramVerified?: boolean;
+  telegramUsername?: string | null;
   createdAt: string;
+}
+
+export interface TelegramSendCodeResponse {
+  registrationToken: string;
+  codeType: string;
+  message: string;
+}
+
+export interface TelegramVerifyResponse {
+  status: 'verified' | 'needs_2fa';
+  hint?: string | null;
+  telegramUserId?: string;
+  telegramUsername?: string | null;
+  firstName?: string | null;
 }
 
 export interface AuthResponse {

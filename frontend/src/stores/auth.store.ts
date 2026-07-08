@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { authApi } from '@/api';
 import { tokenStorage } from '@/api/client';
-import type { ApiUser } from '@/types';
+import type { ApiUser, AuthResponse, TelegramVerifyResponse } from '@/types';
 
 const USER_KEY = 'jobbot.user';
 
@@ -46,11 +46,27 @@ export const useAuthStore = defineStore('auth', () => {
     email: string,
     password: string,
     fullName: string,
-  ): Promise<void> => {
-    const result = await authApi.register(email, password, fullName);
-    tokenStorage.set(result.accessToken, result.refreshToken);
-    user.value = result.user;
-    persistUser(result.user);
+    registrationToken: string,
+    code: string,
+    telegramPassword?: string,
+  ): Promise<TelegramVerifyResponse | void> => {
+    const result = await authApi.register(
+      email,
+      password,
+      fullName,
+      registrationToken,
+      code,
+      telegramPassword,
+    );
+
+    if ('status' in result && result.status === 'needs_2fa') {
+      return result;
+    }
+
+    const auth = result as AuthResponse;
+    tokenStorage.set(auth.accessToken, auth.refreshToken);
+    user.value = auth.user;
+    persistUser(auth.user);
   };
 
   const logout = async (): Promise<void> => {

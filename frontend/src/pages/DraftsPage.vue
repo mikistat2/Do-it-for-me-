@@ -58,11 +58,19 @@
           <textarea v-model="editing.body" class="input h-64"></textarea>
         </div>
         <div class="flex justify-end gap-2">
-          <button class="btn-secondary" :disabled="saving" @click="saveDraft">Save changes</button>
+          <button
+            v-if="editing.status === 'PENDING'"
+            class="btn-primary"
+            :disabled="saving || regenerating"
+            @click="regenerateDraft"
+          >
+            <span v-text="regenerating ? 'Regenerating…' : '🔄 Regenerate with AI'"></span>
+          </button>
+          <button class="btn-secondary" :disabled="saving || regenerating" @click="saveDraft">Save changes</button>
           <button
             v-if="editing.status === 'PENDING'"
             class="btn-success"
-            :disabled="saving"
+            :disabled="saving || regenerating"
             @click="approveFromModal"
           >
             Approve &amp; send
@@ -97,6 +105,7 @@ const busyId = ref<string | null>(null);
 const modalOpen = ref(false);
 const editing = ref<ApplicationDraft | null>(null);
 const saving = ref(false);
+const regenerating = ref(false);
 
 const load = async (): Promise<void> => {
   loading.value = true;
@@ -150,6 +159,25 @@ const saveDraft = async (): Promise<void> => {
     toast.error(extractError(err).message);
   } finally {
     saving.value = false;
+  }
+};
+
+const regenerateDraft = async (): Promise<void> => {
+  if (!editing.value) {
+    return;
+  }
+  regenerating.value = true;
+  try {
+    const updatedDraft = await draftApi.regenerate(editing.value.id);
+    // Update the local editing copy
+    editing.value.subject = updatedDraft.subject;
+    editing.value.body = updatedDraft.body;
+    toast.success('Draft regenerated with AI');
+    await load();
+  } catch (err) {
+    toast.error(extractError(err).message);
+  } finally {
+    regenerating.value = false;
   }
 };
 

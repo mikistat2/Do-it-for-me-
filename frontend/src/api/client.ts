@@ -30,6 +30,12 @@ export const http: AxiosInstance = axios.create({
   timeout: 30000,
 });
 
+export const telegramHttp: AxiosInstance = axios.create({
+  baseURL,
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 120000,
+});
+
 let onUnauthorized: (() => void) | null = null;
 export const setUnauthorizedHandler = (handler: () => void): void => {
   onUnauthorized = handler;
@@ -133,10 +139,16 @@ export interface ApiError {
 export const extractError = (error: unknown): ApiError => {
   if (axios.isAxiosError(error)) {
     const body = error.response?.data as
-      | { error?: ApiError }
+      | { error?: ApiError | string; message?: string }
       | undefined;
-    if (body?.error) {
+    if (typeof body?.error === 'string') {
+      return { code: 'API_ERROR', message: body.error };
+    }
+    if (body?.error && typeof body.error === 'object') {
       return body.error;
+    }
+    if (body?.message) {
+      return { code: 'API_ERROR', message: body.message };
     }
     return { code: 'NETWORK_ERROR', message: error.message };
   }

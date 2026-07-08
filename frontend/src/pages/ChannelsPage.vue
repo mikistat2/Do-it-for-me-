@@ -45,6 +45,13 @@
             <span v-text="channel.status === 'ACTIVE' ? 'Pause' : 'Activate'"></span>
           </button>
           <button
+            class="btn-secondary text-xs flex-1"
+            :disabled="syncingId === channel.id"
+            @click="syncChannel(channel)"
+          >
+            <span v-text="syncingId === channel.id ? 'Syncing...' : 'Sync'"></span>
+          </button>
+          <button
             class="btn-secondary text-xs text-rose-600 hover:bg-rose-50"
             @click="removeChannel(channel)"
           >
@@ -104,6 +111,7 @@ import type { TelegramChannel } from '@/types';
 const toast = useToast();
 const loading = ref(true);
 const saving = ref(false);
+const syncingId = ref<string | null>(null);
 const channels = ref<TelegramChannel[]>([]);
 
 const showModal = ref(false);
@@ -167,6 +175,19 @@ const toggleStatus = async (channel: TelegramChannel) => {
     toast.success(`Channel ${newStatus.toLowerCase()}`);
   } catch (err) {
     toast.error(extractError(err).message);
+  }
+};
+
+const syncChannel = async (channel: TelegramChannel) => {
+  syncingId.value = channel.id;
+  try {
+    const result = await channelApi.sync(channel.id);
+    toast.success(`Synced ${result.processed} messages, found ${result.jobs} jobs`);
+    await load();
+  } catch (err) {
+    toast.error(extractError(err).message);
+  } finally {
+    syncingId.value = null;
   }
 };
 
