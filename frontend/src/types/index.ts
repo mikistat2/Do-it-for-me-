@@ -109,12 +109,26 @@ export interface JobMatch {
   createdAt: string;
 }
 
+export interface JobSourceChannel {
+  id: string;
+  title?: string | null;
+  username?: string | null;
+}
+
+export interface JobSourceMessage {
+  id: string;
+  channelId?: string | null;
+  messageDate?: string | null;
+  channel?: JobSourceChannel | null;
+}
+
 export interface Job {
   id: string;
   title: string;
   company?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
+  contactTelegram?: string | null;
   experience?: string | null;
   salary?: string | null;
   remoteType: RemoteType;
@@ -127,6 +141,7 @@ export interface Job {
   skills?: JobSkill[];
   locations?: JobLocation[];
   match?: JobMatch | null;
+  message?: JobSourceMessage | null;
 }
 
 export type DraftStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SENT';
@@ -137,6 +152,7 @@ export interface ApplicationDraft {
   subject: string;
   body: string;
   toEmail: string;
+  toTelegram?: string | null;
   status: DraftStatus;
   createdAt: string;
   updatedAt: string;
@@ -154,6 +170,7 @@ export interface Application {
   id: string;
   jobId: string;
   toEmail: string;
+  toTelegram?: string | null;
   subject: string;
   body: string;
   status: ApplicationStatus;

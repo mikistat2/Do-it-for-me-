@@ -6,14 +6,11 @@ use App\Models\Job;
 use App\Models\TelegramMessage;
 use App\Models\JobMatch;
 use App\Models\ApplicationDraft;
-use App\Models\TelegramChannel;
 use App\Repositories\JobRepository;
-use App\Repositories\DraftRepository;
 use App\Repositories\ProfileRepository;
 use App\Repositories\SettingsRepository;
 use Illuminate\Support\Facades\DB;
-use App\Enums\JobStatus;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class ApplicationEngineService
 {
@@ -25,7 +22,6 @@ class ApplicationEngineService
         private JobRepository $jobRepo,
         private ProfileRepository $profileRepo,
         private SettingsRepository $settingsRepo,
-        private DraftRepository $draftRepo,
         private ApplicationService $applicationService,
         private EmailGenerationService $emailGenerationService,
         private NotificationService $notificationService,
@@ -36,7 +32,7 @@ class ApplicationEngineService
     {
         $parsed = $this->jobDetector->detectJob($message['rawText']);
 
-        // Upsert TelegramMessage
+        // Upsert TelegramMessage — ALWAYS store, even non-jobs
         $telegramMessage = TelegramMessage::updateOrCreate(
             [
                 'channel_id' => $message['channelId'],
@@ -54,9 +50,23 @@ class ApplicationEngineService
             return ['status' => 'IGNORED'];
         }
 
+        Log::info('Pipeline Step 1: Job post detected', [
+            'title'    => $parsed['title'] ?? 'n/a',
+            'email'    => $parsed['email'] ?? 'none',
+            'telegram' => $parsed['telegram'] ?? 'none',
+            'skills'   => count($parsed['skills']),
+        ]);
+
         $duplicate = $this->jobRepo->findByHash($message['userId'], $parsed['contentHash']);
         if ($duplicate) {
-            $this->logService->info('SYSTEM', 'Duplicate job ignored', ['jobId' => $duplicate->id]);
+            // If this job was stored before the user completed their profile,
+            // it never got scored — score it now instead of dropping it.
+            if (!$duplicate->match && $duplicate->status === 'DETECTED') {
+                $rescued = $this->scoreAndDraft($duplicate, $parsed['skills']);
+                if ($rescued !== null) {
+                    return ['status' => $rescued['status'], 'jobId' => $duplicate->id, 'score' => $rescued['score']];
+                }
+            }
             return ['status' => 'DUPLICATE', 'jobId' => $duplicate->id];
         }
 
@@ -68,6 +78,7 @@ class ApplicationEngineService
                 'company' => $parsed['company'],
                 'contact_email' => $parsed['email'],
                 'contact_phone' => $parsed['phone'],
+                'contact_telegram' => $parsed['telegram'],
                 'experience' => $parsed['experience'],
                 'salary' => $parsed['salary'],
                 'remote_type' => $parsed['remoteType'],
@@ -88,20 +99,95 @@ class ApplicationEngineService
             return $job;
         });
 
-        $profile = $this->profileRepo->findByUserId($message['userId']);
-        $settings = $this->settingsRepo->findByUserId($message['userId']);
+        Log::info('Pipeline Step 2: Job created → DETECTED', [
+            'jobId' => $job->id,
+            'title' => $job->title,
+            'email' => $job->contact_email ?? 'none',
+        ]);
 
-        if (!$profile) {
-            $this->logService->warn('SYSTEM', 'No profile for matching', ['userId' => $message['userId']]);
-            return ['status' => 'SKIPPED', 'jobId' => $job->id];
+        $result = $this->scoreAndDraft($job, $parsed['skills']);
+
+        if ($result === null) {
+            // No profile yet — job is saved and will be scored once the
+            // profile exists (via the duplicate-rescue path or scoreUnprocessedJobs).
+            return ['status' => 'DETECTED', 'jobId' => $job->id];
         }
 
-        $analysis = $this->matchingService->analyze($job, $profile, $parsed['skills']);
-        
+        return ['status' => $result['status'], 'jobId' => $job->id, 'score' => $result['score']];
+    }
+
+    /**
+     * Score all of a user's DETECTED jobs that never got a match — e.g. jobs
+     * picked up before the user completed their profile. Called from the
+     * scheduled sync so ranking eventually happens for every job.
+     */
+    public function scoreUnprocessedJobs(string $userId): int
+    {
+        $profile = $this->profileRepo->findByUserId($userId);
+        if (!$profile) {
+            return 0;
+        }
+
+        $jobs = Job::with(['skills', 'match'])
+            ->where('user_id', $userId)
+            ->where('status', 'DETECTED')
+            ->whereDoesntHave('match')
+            ->orderBy('created_at')
+            ->limit(25)
+            ->get();
+
+        $scored = 0;
+        foreach ($jobs as $job) {
+            $skills = $job->skills->pluck('name')->all();
+            if ($this->scoreAndDraft($job, $skills) !== null) {
+                $scored++;
+            }
+        }
+
+        if ($scored > 0) {
+            $this->logService->info('SYSTEM', 'Scored previously unprocessed jobs', [
+                'userId' => $userId,
+                'count'  => $scored,
+            ]);
+        }
+
+        return $scored;
+    }
+
+    /**
+     * Run the scoring → notification → draft → (auto-apply) pipeline for a job.
+     *
+     * Returns null when the user has no profile (job stays DETECTED).
+     * Otherwise returns ['status' => ..., 'score' => ...].
+     */
+    private function scoreAndDraft(Job $job, array $jobSkills): ?array
+    {
+        $userId = $job->user_id;
+        $profile = $this->profileRepo->findByUserId($userId);
+        $settings = $this->settingsRepo->findByUserId($userId);
+
+        if (!$profile) {
+            Log::info('Pipeline: No profile → job kept as DETECTED', ['jobId' => $job->id]);
+            $this->logService->warn('SYSTEM', 'No profile for matching — job saved but not scored', ['userId' => $userId]);
+            return null;
+        }
+
+        $threshold = (int) ($settings->match_threshold ?? config('app.automation_match_threshold', 70));
+
+        // ── Score the job (AI first, local fallback) ───────────────────
+        $analysis = $this->matchingService->analyze($job, $profile, $jobSkills);
+
+        Log::info('Pipeline Step 3: Scoring complete', [
+            'jobId'          => $job->id,
+            'score'          => $analysis['score'],
+            'recommendation' => $analysis['recommendation'],
+            'threshold'      => $threshold,
+        ]);
+
         JobMatch::updateOrCreate(
             ['job_id' => $job->id],
             [
-                'user_id' => $message['userId'],
+                'user_id' => $userId,
                 'score' => $analysis['score'],
                 'strengths' => $analysis['strengths'],
                 'weaknesses' => $analysis['weaknesses'],
@@ -112,86 +198,96 @@ class ApplicationEngineService
 
         $this->jobRepo->updateStatus($job->id, 'MATCHED');
 
-        if ($analysis['score'] >= self::HIGH_SCORE_THRESHOLD && ($settings->notify_on_high_score ?? true)) {
-            $this->notificationService->create([
-                'userId' => $message['userId'],
-                'type' => 'HIGH_SCORE_JOB',
-                'title' => 'New high-score job',
-                'message' => "{$job->title} scored {$analysis['score']}",
-                'metadata' => ['jobId' => $job->id, 'score' => $analysis['score']],
-            ]);
-        }
-
-        $decision = $this->decideApplicationAction([
-            'score' => $analysis['score'],
-            'contactEmail' => $parsed['email'],
-            'profile' => $profile,
-            'settings' => $settings,
-        ]);
-
-        if ($decision['action'] === 'SKIP') {
-            $this->jobRepo->updateStatus($job->id, 'SKIPPED');
-            $this->logService->info('SYSTEM', 'Job skipped', [
-                'jobId' => $job->id,
-                'reason' => $decision['reason'],
-            ]);
-            return ['status' => 'SKIPPED', 'jobId' => $job->id, 'score' => $analysis['score']];
-        }
-
-        $emailContent = $this->emailGenerationService->generate($job, $profile);
-        
-        $draft = ApplicationDraft::create([
-            'job_id' => $job->id,
-            'user_id' => $message['userId'],
-            'subject' => $emailContent['subject'],
-            'body' => $emailContent['body'],
-            'to_email' => $parsed['email'] ?? '',
-            'status' => 'PENDING',
-        ]);
-        
-        $this->jobRepo->updateStatus($job->id, 'DRAFTED');
-
-        if ($decision['action'] === 'AUTO_APPLY') {
-            $result = $this->applicationService->dispatch([
-                'userId' => $message['userId'],
-                'jobId' => $job->id,
-                'toEmail' => $parsed['email'],
-                'subject' => $emailContent['subject'],
-                'body' => $emailContent['body'],
-                'draftId' => $draft->id,
-            ]);
-            return [
-                'status' => $result['status'] === 'SENT' ? 'APPLIED' : 'SKIPPED',
+        // ── Below the user's threshold → keep as MATCHED, no draft ─────
+        if ($analysis['score'] < $threshold) {
+            Log::info('Pipeline complete: MATCHED (below threshold, no draft)', [
                 'jobId' => $job->id,
                 'score' => $analysis['score'],
-            ];
+            ]);
+            return ['status' => 'MATCHED', 'score' => $analysis['score']];
         }
 
-        return ['status' => 'DRAFTED', 'jobId' => $job->id, 'score' => $analysis['score']];
-    }
+        // ── Score meets threshold → generate email draft ───────────────
+        $emailContent = $this->emailGenerationService->generate($job, $profile);
 
-    private function decideApplicationAction(array $ctx): array
-    {
-        if (empty($ctx['contactEmail'])) {
-            return ['action' => 'SKIP', 'reason' => 'No contact email found'];
+        $draft = ApplicationDraft::updateOrCreate(
+            ['job_id' => $job->id, 'user_id' => $userId],
+            [
+                'subject' => $emailContent['subject'],
+                'body' => $emailContent['body'],
+                'to_email' => $job->contact_email ?? '',
+                'to_telegram' => $job->contact_telegram,
+                'status' => 'PENDING',
+            ]
+        );
+
+        $this->jobRepo->updateStatus($job->id, 'DRAFTED');
+
+        Log::info('Pipeline Step 4: Draft created → DRAFTED', [
+            'jobId'   => $job->id,
+            'draftId' => $draft->id,
+        ]);
+
+        // ── Notify the user that a matching job has a draft ready ──────
+        $hasEmail = !empty($job->contact_email) && filter_var($job->contact_email, FILTER_VALIDATE_EMAIL);
+        $hasTelegram = !empty($job->contact_telegram);
+
+        $contactNote = match (true) {
+            $hasEmail && $hasTelegram => 'An application draft is ready — it can be sent by email or Telegram (@' . $job->contact_telegram . ').',
+            $hasEmail                 => 'An application draft is ready for review.',
+            $hasTelegram              => 'An application draft is ready — it will be sent via Telegram (@' . $job->contact_telegram . ').',
+            default                   => 'Draft created, but no contact email or Telegram was found — add one before sending.',
+        };
+
+        $this->notificationService->create([
+            'userId' => $userId,
+            'type' => 'HIGH_SCORE_JOB',
+            'title' => $analysis['score'] >= self::HIGH_SCORE_THRESHOLD
+                ? 'Excellent job match found'
+                : 'New job match',
+            'message' => "\"{$job->title}\" scored {$analysis['score']} (threshold {$threshold}). " . $contactNote,
+            'metadata' => ['jobId' => $job->id, 'draftId' => $draft->id, 'score' => $analysis['score']],
+        ]);
+
+        // ── Auto-apply when enabled and any contact channel exists ─────
+        $automationPaused = (bool) ($settings->automation_paused ?? true);
+        $autoApply = (bool) ($settings->auto_apply ?? false);
+
+        if (!$automationPaused && $autoApply && ($hasEmail || $hasTelegram)) {
+            Log::info('Pipeline Step 5: AUTO_APPLY → dispatching application', [
+                'jobId'      => $job->id,
+                'toEmail'    => $job->contact_email ?? 'none',
+                'toTelegram' => $job->contact_telegram ?? 'none',
+            ]);
+
+            try {
+                $result = $this->applicationService->dispatch([
+                    'userId' => $userId,
+                    'jobId' => $job->id,
+                    'toEmail' => $hasEmail ? $job->contact_email : null,
+                    'toTelegram' => $job->contact_telegram,
+                    'subject' => $emailContent['subject'],
+                    'body' => $emailContent['body'],
+                    'draftId' => $draft->id,
+                ]);
+
+                if ($result['status'] === 'SENT') {
+                    return ['status' => 'APPLIED', 'score' => $analysis['score']];
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Pipeline: auto-apply dispatch failed, keeping draft', [
+                    'jobId' => $job->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
-        $automationPaused = $ctx['settings']->automation_paused ?? true;
-        if ($automationPaused) {
-            return ['action' => 'DRAFT', 'reason' => 'Automation is paused'];
-        }
+        Log::info('Pipeline complete: DRAFTED (awaiting user review)', [
+            'jobId'   => $job->id,
+            'draftId' => $draft->id,
+            'score'   => $analysis['score'],
+        ]);
 
-        $score = $ctx['score'];
-        $threshold = $ctx['settings']->match_threshold ?? 70;
-        if ($score < $threshold) {
-            return ['action' => 'SKIP', 'reason' => "Score {$score} is below threshold {$threshold}"];
-        }
-
-        $autoApply = $ctx['settings']->auto_apply ?? false;
-        if ($autoApply) {
-            return ['action' => 'AUTO_APPLY', 'reason' => 'Score meets threshold and auto-apply is ON'];
-        }
-
-        return ['action' => 'DRAFT', 'reason' => 'Score meets threshold but auto-apply is OFF'];
+        return ['status' => 'DRAFTED', 'score' => $analysis['score']];
     }
 }

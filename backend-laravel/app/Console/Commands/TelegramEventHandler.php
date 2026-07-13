@@ -49,9 +49,12 @@ use danog\MadelineProto\EventHandler;
                 ->get();
 
             if ($channels->isEmpty()) {
-                $channels = TelegramChannel::whereIn('channel_id', ["-100{$chatId}", "-{$chatId}"])
-                    ->where('status', 'ACTIVE')
-                    ->get();
+                $cleanChatId = ltrim(str_replace('-100', '', $chatId), '-');
+                $channels = TelegramChannel::whereIn('channel_id', [
+                    $cleanChatId,
+                    "-100{$cleanChatId}",
+                    "-{$cleanChatId}"
+                ])->where('status', 'ACTIVE')->get();
             }
 
             if ($channels->isEmpty()) {

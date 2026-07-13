@@ -35,7 +35,7 @@
         <tbody>
           <tr v-for="app in applications" :key="app.id" class="border-b border-slate-100 last:border-0 dark:border-slate-800">
             <td class="py-3 pr-4 font-medium" v-text="app.subject"></td>
-            <td class="py-3 pr-4 text-slate-500" v-text="app.toEmail"></td>
+            <td class="py-3 pr-4 text-slate-500" v-text="recipientLabel(app)"></td>
             <td class="py-3 pr-4"><StatusBadge :status="app.status" /></td>
             <td class="py-3 pr-4" v-text="app.attempts"></td>
             <td class="py-3 pr-4 text-slate-500" v-text="formatDate(app.sentAt)"></td>
@@ -52,7 +52,7 @@
       <div v-if="selected" class="flex flex-col gap-3">
         <div class="flex items-center gap-2">
           <StatusBadge :status="selected.status" />
-          <span class="text-sm text-slate-500" v-text="selected.toEmail"></span>
+          <span class="text-sm text-slate-500" v-text="recipientLabel(selected)"></span>
         </div>
         <p v-if="selected.error" class="rounded-lg bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-900/30 dark:text-rose-300" v-text="selected.error"></p>
         <div class="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
@@ -118,6 +118,13 @@ const applyFilters = (): void => {
 const changePage = (page: number): void => {
   meta.value.page = page;
   void load();
+};
+
+const recipientLabel = (app: Application): string => {
+  const parts: string[] = [];
+  if (app.toEmail) parts.push(app.toEmail);
+  if (app.toTelegram) parts.push(`@${app.toTelegram.replace(/^@/, '')} (Telegram)`);
+  return parts.length ? parts.join(' · ') : '—';
 };
 
 const openApplication = (app: Application): void => {

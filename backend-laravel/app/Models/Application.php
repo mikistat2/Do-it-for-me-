@@ -18,6 +18,7 @@ class Application extends Model
         'user_id',
         'draft_id',
         'to_email',
+        'to_telegram',
         'subject',
         'body',
         'status',

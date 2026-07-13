@@ -20,6 +20,7 @@ class Job extends Model
         'company',
         'contact_email',
         'contact_phone',
+        'contact_telegram',
         'experience',
         'salary',
         'remote_type',

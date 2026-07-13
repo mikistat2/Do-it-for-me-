@@ -14,7 +14,7 @@ class JobRepository
      */
     public function list(array $filter, array $sort, array $pagination): array
     {
-        $query = Job::with(['skills', 'locations', 'match', 'message'])
+        $query = Job::with(['skills', 'locations', 'match', 'message.channel'])
             ->where('user_id', $filter['userId']);
 
         if (!empty($filter['status'])) {
@@ -53,7 +53,7 @@ class JobRepository
 
     public function findById(string $userId, string $id): ?Job
     {
-        return Job::with(['skills', 'locations', 'match', 'message'])
+        return Job::with(['skills', 'locations', 'match', 'message.channel'])
             ->where('id', $id)
             ->where('user_id', $userId)
             ->first();

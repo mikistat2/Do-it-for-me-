@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\TelegramChannel;
+use App\Models\TelegramMessage;
 use App\Repositories\ChannelRepository;
 use App\Repositories\UserRepository;
 use App\Support\Pagination;
@@ -115,6 +116,13 @@ class ChannelService
                 ]);
             }
 
+            // Incremental sync: only fetch messages newer than the last one
+            // we already stored for this channel.
+            $lastSyncedId = (int) TelegramMessage::where('channel_id', $channel->id)
+                ->whereRaw("telegram_msg_id ~ '^[0-9]+$'")
+                ->selectRaw("MAX(CAST(telegram_msg_id AS BIGINT)) as max_id")
+                ->value('max_id');
+
             $history = $api->messages->getHistory(
                 peer: $peer,
                 offset_id: 0,
@@ -122,7 +130,7 @@ class ChannelService
                 add_offset: 0,
                 limit: 50,
                 max_id: 0,
-                min_id: 0,
+                min_id: $lastSyncedId,
                 hash: [],
             );
 
@@ -132,7 +140,8 @@ class ChannelService
 
             foreach ($messages as $message) {
                 $text = $message['message'] ?? '';
-                if (!$text) {
+                $msgId = (int) ($message['id'] ?? 0);
+                if (!$text || ($lastSyncedId && $msgId <= $lastSyncedId)) {
                     continue;
                 }
 
@@ -140,17 +149,21 @@ class ChannelService
                 $result = $this->engine->processMessage([
                     'userId' => $userId,
                     'channelId' => $channel->id,
-                    'telegramMsgId' => (string) ($message['id'] ?? ''),
+                    'telegramMsgId' => (string) $msgId,
                     'rawText' => $text,
                     'senderId' => isset($message['from_id']['user_id']) ? (string) $message['from_id']['user_id'] : null,
                     'messageDate' => Carbon::createFromTimestamp($message['date'] ?? time()),
                 ]);
 
-                if (($result['status'] ?? 'IGNORED') !== 'IGNORED') {
+                $status = $result['status'] ?? 'IGNORED';
+                if (!in_array($status, ['IGNORED', 'DUPLICATE'], true)) {
                     $jobs++;
                     $channel->update(['last_message_at' => now()]);
                 }
             }
+
+            // Score any jobs that were detected before the user had a profile
+            $this->engine->scoreUnprocessedJobs($userId);
 
             $this->logService->info('TELEGRAM', 'Channel history synced', [
                 'userId' => $userId,
@@ -172,6 +185,45 @@ class ChannelService
             unset($api);
             gc_collect_cycles();
         }
+    }
+
+    public function syncAllForUser(string $userId): array
+    {
+        $user = $this->userRepo->findById($userId);
+        if (!$user || !$user->telegram_verified_at) {
+            throw new HttpException(422, 'Telegram account is not linked');
+        }
+
+        $channels = $this->channelRepo->findActiveForUser($userId);
+        $totalProcessed = 0;
+        $totalJobs = 0;
+        $errors = [];
+
+        foreach ($channels as $channel) {
+            try {
+                $result = $this->syncHistory($userId, $channel->id);
+                $totalProcessed += $result['processed'];
+                $totalJobs += $result['jobs'];
+            } catch (\Throwable $e) {
+                $errors[] = [
+                    'channelId' => $channel->id,
+                    'title'     => $channel->title,
+                    'error'     => $e->getMessage(),
+                ];
+                $this->logService->warn('TELEGRAM', 'Sync failed for channel during sync-all', [
+                    'userId'    => $userId,
+                    'channelId' => $channel->id,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return [
+            'processed' => $totalProcessed,
+            'jobs'      => $totalJobs,
+            'channels'  => count($channels),
+            'errors'    => $errors,
+        ];
     }
 
     private function resolveChannel($user, string $identifier, $api = null): array

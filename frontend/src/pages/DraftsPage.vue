@@ -15,7 +15,7 @@
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
             <p class="truncate font-semibold" v-text="draft.subject"></p>
-            <p class="truncate text-xs text-slate-500" v-text="draft.toEmail"></p>
+            <p class="truncate text-xs text-slate-500" v-text="destinationLabel(draft)"></p>
           </div>
           <StatusBadge :status="draft.status" />
         </div>
@@ -45,9 +45,15 @@
 
     <ModalDialog v-model="modalOpen" :title="'Edit draft'">
       <div v-if="editing" class="flex flex-col gap-3">
-        <div>
-          <label class="label">Recipient email</label>
-          <input v-model="editing.toEmail" class="input" type="email" />
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label class="label">Recipient email</label>
+            <input v-model="editing.toEmail" class="input" type="email" placeholder="none" />
+          </div>
+          <div>
+            <label class="label">Recipient Telegram</label>
+            <input v-model="editing.toTelegram" class="input" type="text" placeholder="@username" />
+          </div>
         </div>
         <div>
           <label class="label">Subject</label>
@@ -136,6 +142,13 @@ const changePage = (page: number): void => {
   void load();
 };
 
+const destinationLabel = (draft: ApplicationDraft): string => {
+  const parts: string[] = [];
+  if (draft.toEmail) parts.push(draft.toEmail);
+  if (draft.toTelegram) parts.push(`@${draft.toTelegram.replace(/^@/, '')} (Telegram)`);
+  return parts.length ? parts.join(' · ') : 'No recipient set';
+};
+
 const openDraft = (draft: ApplicationDraft): void => {
   editing.value = { ...draft };
   modalOpen.value = true;
@@ -150,7 +163,8 @@ const saveDraft = async (): Promise<void> => {
     await draftApi.update(editing.value.id, {
       subject: editing.value.subject,
       body: editing.value.body,
-      toEmail: editing.value.toEmail,
+      toEmail: editing.value.toEmail || undefined,
+      toTelegram: editing.value.toTelegram || undefined,
     });
     toast.success('Draft updated');
     modalOpen.value = false;

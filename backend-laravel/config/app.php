@@ -129,7 +129,7 @@ return [
 
     // ── HuggingFace (AI scoring & email generation) ────────
     'hf_token' => env('HF_TOKEN'),
-    'hf_model' => env('HF_MODEL', 'mistralai/Mistral-7B-Instruct-v0.3'),
+    'hf_model' => env('HF_MODEL', 'meta-llama/Llama-3.1-8B-Instruct'),
 
     // ── Telegram MTProto credentials ───────────────────────────
     'telegram_api_id'     => env('TELEGRAM_API_ID'),

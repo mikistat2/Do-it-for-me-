@@ -80,8 +80,15 @@ const refreshTokens = async (): Promise<string> => {
   return accessToken;
 };
 
+import { keysToCamelCase } from '@/utils/case-converter';
+
 http.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.data) {
+      response.data = keysToCamelCase(response.data);
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     const original = error.config as (AxiosRequestConfig & {
       _retry?: boolean;

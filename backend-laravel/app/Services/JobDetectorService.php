@@ -2,8 +2,6 @@
 
 namespace App\Services;
 
-use App\Enums\RemoteType;
-
 class JobDetectorService
 {
     private const JOB_KEYWORDS = [
@@ -27,12 +25,15 @@ class JobDetectorService
 
     private const EMAIL_REGEX = '/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/';
     private const PHONE_REGEX = '/(\+?\d[\d\s().-]{7,}\d)/';
-    private const SALARY_REGEX = '/(?:salary|compensation|pay|ደሞዝ)\s*[:\-]?\s*([^\n]+)|(\$\s?\d[\d,]*(?:\s?-\s?\$?\d[\d,]*)?(?:\s?(?:k|usd|per month|\/month|\/year))?)/i';
+    private const SALARY_REGEX = '/(?:salary|compensation|pay|ደሞዝ)\s*[:-]?\s*([^\n]+)|(\$\s?\d[\d,]*(?:\s?-\s?\$?\d[\d,]*)?(?:\s?(?:k|usd|per month|\/month|\/year))?)/i';
     private const EXPERIENCE_REGEX = '/(\d+\+?\s*(?:-\s*\d+\s*)?(?:years?|yrs?|ዓመት|ዓመታት))\s*(?:of\s*)?(?:experience|ልምድ)?/i';
-    private const TITLE_REGEX = '/(?:position|role|title|hiring(?:\s+for)?|we(?:\'re| are) looking for(?: an?)?|የስራው መጠሪያ)\s*[:\-]?\s*([^\n]{3,60})/i';
-    private const COMPANY_REGEX = '/(?:company|at|@|ድርጅት|ቀጣሪ)\s*[:\-]?\s*([^\n]{1,50})/';
-    private const DEADLINE_REGEX = '/(?:deadline|apply before|closing date|last date|ማመልከቻ ማብቂያ(?: ቀን)?)\s*[:\-]?\s*([0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}|[A-Za-z]+\s+[0-9]{1,2}(?:,?\s*[0-9]{4})?)/i';
-    private const LOCATION_REGEX = '/(?:location|based in|located in)\s*[:\-]?\s*([A-Za-z][A-Za-z ,]{2,40})/i';
+    
+    private const STOP_WORDS = '(?=\s*(?:Location|Requirements|Responsibilities|Job Title|Title|Company|Salary|Experience|How to|Deadline|Contact)\b|$)';
+    
+    private const TITLE_REGEX = '/(?:position|role|title|hiring(?:\s+for)?|we are looking for(?: an?)?|የስራው መጠሪያ)\s*[:-]?\s*(.{2,60}?)(?:' . self::STOP_WORDS . ')/iu';
+    private const COMPANY_REGEX = '/(?:^|\s)(?:company|ድርጅት|ቀጣሪ)\s*[:-]?\s*(.{2,50}?)(?:' . self::STOP_WORDS . ')/iu';
+    private const DEADLINE_REGEX = '/(?:deadline|apply before|closing date|last date|ማመልከቻ ማብቂያ(?: ቀን)?)\s*[:-]?\s*([0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}|[A-Za-z]+\s+[0-9]{1,2}(?:,?\s*[0-9]{4})?)/i';
+    private const LOCATION_REGEX = '/(?:location|based in|located in)\s*[:-]?\s*(.{2,40}?)(?:' . self::STOP_WORDS . ')/iu';
 
     public function detectJob(string $rawText): array
     {
@@ -46,8 +47,7 @@ class JobDetectorService
             }
         }
 
-        $hasEmail = preg_match(self::EMAIL_REGEX, $text);
-        $isJobPost = $keywordHits >= 2 || ($keywordHits >= 1 && $hasEmail);
+        $isJobPost = $keywordHits >= 1;
 
         preg_match(self::EMAIL_REGEX, $text, $emailMatch);
         preg_match(self::PHONE_REGEX, $text, $phoneMatch);
@@ -68,6 +68,7 @@ class JobDetectorService
 
         $remoteType = $this->detectRemoteType($lower);
         $locations = $this->detectLocations($text);
+        $telegram = $this->detectTelegramContact($text);
 
         $firstLine = explode("\n", $text)[0] ?? '';
         $fallbackTitle = $this->normalize($firstLine);
@@ -83,6 +84,7 @@ class JobDetectorService
             'company' => !empty($companyMatch[1]) ? $this->normalize($companyMatch[1]) : null,
             'email' => $emailMatch[0] ?? null,
             'phone' => !empty($phoneMatch[1]) ? $this->normalize($phoneMatch[1]) : null,
+            'telegram' => $telegram,
             'skills' => array_values($skills),
             'experience' => !empty($experienceMatch[0]) ? $this->normalize($experienceMatch[0]) : null,
             'salary' => !empty($salaryMatch[1]) ? $this->normalize($salaryMatch[1]) : (!empty($salaryMatch[2]) ? $this->normalize($salaryMatch[2]) : null),
@@ -92,6 +94,63 @@ class JobDetectorService
             'description' => $this->normalize($text),
             'contentHash' => $this->hashContent($text),
         ];
+    }
+
+    /**
+     * Extract a Telegram contact handle from a job post.
+     *
+     * Preference order:
+     *   1. A handle appearing right after contact-style wording
+     *      ("DM @user", "apply @user", "contact @user", "telegram: @user", …)
+     *   2. A t.me/username or telegram.me/username link
+     *   3. Any standalone @handle (never the "@" inside an email address)
+     *
+     * Returns the username WITHOUT the leading "@", or null.
+     */
+    /** Promotional channel tags commonly appended to posts — never a DM contact. */
+    private const TELEGRAM_TAG_DENYLIST = [
+        'freelance_ethio', 'afriwork', 'afriworket', 'ethiojobs', 'ethio_jobs',
+        'effoyjobs', 'effoy_jobs', 'fanajobs', 'fana_jobs', 'maroset',
+    ];
+
+    private function detectTelegramContact(string $text): ?string
+    {
+        // 1. Handle near contact-style wording (same or following ~40 chars).
+        //    The lookbehind rejects the "@" inside email addresses.
+        $contactContext = '/(?:dm|contact|apply|message|text|telegram|inbox|reach|via|send)[^\n@]{0,40}(?<![\w.])@([A-Za-z][A-Za-z0-9_]{4,31})\b/iu';
+        if (preg_match_all($contactContext, $text, $m)) {
+            foreach ($m[1] as $handle) {
+                if ($this->isUsableTelegramHandle($handle)) {
+                    return $handle;
+                }
+            }
+        }
+
+        // 2. t.me / telegram.me links (t.me/joinchat and t.me/+invite are groups)
+        if (preg_match_all('~(?:https?://)?t(?:elegram)?\.me/([A-Za-z][A-Za-z0-9_]{3,31})\b~i', $text, $m)) {
+            foreach ($m[1] as $handle) {
+                if (strtolower($handle) !== 'joinchat' && $this->isUsableTelegramHandle($handle)) {
+                    return $handle;
+                }
+            }
+        }
+
+        // 3. Any standalone @handle — the lookbehind rejects the "@" inside
+        //    email addresses (preceded by a word character or dot)
+        if (preg_match_all('/(?<![\w@.])@([A-Za-z][A-Za-z0-9_]{4,31})\b/u', $text, $m)) {
+            foreach ($m[1] as $handle) {
+                if ($this->isUsableTelegramHandle($handle)) {
+                    return $handle;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function isUsableTelegramHandle(string $handle): bool
+    {
+        return !in_array(strtolower($handle), self::TELEGRAM_TAG_DENYLIST, true);
     }
 
     private function detectRemoteType(string $lower): string

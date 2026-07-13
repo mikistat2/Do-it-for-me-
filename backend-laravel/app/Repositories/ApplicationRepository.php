@@ -46,13 +46,14 @@ class ApplicationRepository
     public function create(array $data): Application
     {
         return Application::create([
-            'job_id'   => $data['jobId'],
-            'user_id'  => $data['userId'],
-            'draft_id' => $data['draftId'] ?? null,
-            'to_email' => $data['toEmail'],
-            'subject'  => $data['subject'],
-            'body'     => $data['body'],
-            'status'   => $data['status'],
+            'job_id'      => $data['jobId'],
+            'user_id'     => $data['userId'],
+            'draft_id'    => $data['draftId'] ?? null,
+            'to_email'    => $data['toEmail'] ?? '',
+            'to_telegram' => $data['toTelegram'] ?? null,
+            'subject'     => $data['subject'],
+            'body'        => $data['body'],
+            'status'      => $data['status'],
         ]);
     }
 

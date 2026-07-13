@@ -31,6 +31,7 @@
           <tr>
             <th class="py-2 pr-4">Title</th>
             <th class="py-2 pr-4">Company</th>
+            <th class="py-2 pr-4">Channel</th>
             <th class="py-2 pr-4">Score</th>
             <th class="py-2 pr-4">Status</th>
             <th class="py-2 pr-4">Detected</th>
@@ -45,6 +46,14 @@
           >
             <td class="py-3 pr-4 font-medium" v-text="job.title"></td>
             <td class="py-3 pr-4 text-slate-500" v-text="job.company ?? '—'"></td>
+            <td class="py-3 pr-4">
+              <span
+                v-if="channelName(job) !== '—'"
+                class="badge bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300"
+                v-text="channelName(job)"
+              ></span>
+              <span v-else class="text-slate-400">—</span>
+            </td>
             <td class="py-3 pr-4">
               <span v-if="job.match" class="font-semibold" v-text="job.match.score"></span>
               <span v-else class="text-slate-400">—</span>
@@ -69,8 +78,21 @@
         </div>
 
         <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><span class="text-slate-500">Channel:</span> <span v-text="channelName(selected)"></span></div>
           <div><span class="text-slate-500">Company:</span> <span v-text="selected.company ?? '—'"></span></div>
           <div><span class="text-slate-500">Email:</span> <span v-text="selected.contactEmail ?? '—'"></span></div>
+          <div>
+            <span class="text-slate-500">Telegram:</span>
+            <a
+              v-if="selected.contactTelegram"
+              :href="`https://t.me/${selected.contactTelegram}`"
+              target="_blank"
+              rel="noopener"
+              class="text-brand-600 hover:underline dark:text-brand-400"
+              v-text="'@' + selected.contactTelegram"
+            ></a>
+            <span v-else>—</span>
+          </div>
           <div><span class="text-slate-500">Phone:</span> <span v-text="selected.contactPhone ?? '—'"></span></div>
           <div><span class="text-slate-500">Experience:</span> <span v-text="selected.experience ?? '—'"></span></div>
           <div><span class="text-slate-500">Deadline:</span> <span v-text="formatDay(selected.deadline)"></span></div>
@@ -115,13 +137,17 @@
           <p class="whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300" v-text="selected.description"></p>
         </div>
 
-        <div class="flex justify-end gap-2">
+        <div class="flex items-center justify-end gap-2">
+          <span
+            v-if="!selected.contactEmail && !selected.contactTelegram"
+            class="text-xs text-slate-400"
+          >No contact email or Telegram found</span>
           <button
             class="btn-primary"
-            :disabled="sending || !selected.contactEmail"
+            :disabled="sending || (!selected.contactEmail && !selected.contactTelegram)"
             @click="manualSend"
           >
-            <span v-text="sending ? 'Sending…' : 'Manual send'"></span>
+            <span v-text="sending ? 'Sending…' : sendLabel"></span>
           </button>
         </div>
       </div>
@@ -130,7 +156,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { applicationApi, jobApi } from '@/api';
 import { extractError } from '@/api/client';
 import { useToast } from '@/composables/useToast';
@@ -155,6 +181,20 @@ const sortBy = ref('createdAt');
 const modalOpen = ref(false);
 const selected = ref<Job | null>(null);
 const sending = ref(false);
+
+const sendLabel = computed((): string => {
+  const job = selected.value;
+  if (!job) return 'Manual send';
+  if (job.contactEmail && job.contactTelegram) return 'Send (email + Telegram)';
+  if (job.contactTelegram) return 'Send via Telegram';
+  return 'Send email';
+});
+
+const channelName = (job: Job): string => {
+  const channel = job.message?.channel;
+  if (!channel) return '—';
+  return channel.title || (channel.username ? `@${channel.username}` : '—');
+};
 
 const load = async (): Promise<void> => {
   loading.value = true;

@@ -71,6 +71,7 @@ Route::middleware(['auth:api', 'throttle:200,1'])->group(function () {
     Route::prefix('channels')->group(function () {
         Route::get('/',             [ChannelController::class, 'list']);
         Route::post('/',            [ChannelController::class, 'create']);
+        Route::post('/sync-all',    [ChannelController::class, 'syncAll']);
         Route::put('/{id}',         [ChannelController::class, 'update']);
         Route::delete('/{id}',      [ChannelController::class, 'remove']);
         Route::post('/{id}/sync',   [ChannelController::class, 'sync']);
@@ -90,6 +91,7 @@ Route::middleware(['auth:api', 'throttle:200,1'])->group(function () {
         Route::put('/{id}',             [DraftController::class, 'update']);
         Route::post('/{id}/reject',     [DraftController::class, 'reject']);
         Route::post('/{id}/regenerate', [DraftController::class, 'regenerate']);
+        Route::post('/{id}/approve',    [ApplicationController::class, 'approveDraft']);
     });
 
     // Applications
@@ -104,8 +106,8 @@ Route::middleware(['auth:api', 'throttle:200,1'])->group(function () {
     Route::prefix('notifications')->group(function () {
         Route::get('/',              [NotificationController::class, 'list']);
         Route::get('/unread-count',  [NotificationController::class, 'unreadCount']);
-        Route::put('/{id}/read',     [NotificationController::class, 'markRead']);
-        Route::put('/read-all',      [NotificationController::class, 'markAllRead']);
+        Route::match(['put', 'post'], '/read-all',  [NotificationController::class, 'markAllRead']);
+        Route::match(['put', 'post'], '/{id}/read', [NotificationController::class, 'markRead']);
     });
 
     // Logs (admin guard could be added here)

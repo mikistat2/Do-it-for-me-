@@ -19,6 +19,7 @@ class ApplicationDraft extends Model
         'subject',
         'body',
         'to_email',
+        'to_telegram',
         'status',
     ];
 

@@ -206,7 +206,7 @@ export const draftApi = {
   },
   async update(
     id: string,
-    payload: { subject?: string; body?: string; toEmail?: string },
+    payload: { subject?: string; body?: string; toEmail?: string; toTelegram?: string },
   ): Promise<ApplicationDraft> {
     const { data } = await http.put<ApiEnvelope<ApplicationDraft>>(
       `/drafts/${id}`,

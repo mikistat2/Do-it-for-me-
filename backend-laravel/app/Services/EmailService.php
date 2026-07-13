@@ -12,17 +12,18 @@ class EmailService
      */
     public function send(string $to, string $subject, string $body): string
     {
-        $messageId = '<' . uniqid('app', true) . '@' . config('mail.from.address', 'doitforme.app') . '>';
+        $fromDomain = explode('@', (string) config('mail.from.address', 'app@doitforme.app'))[1] ?? 'doitforme.app';
+        $messageId = uniqid('app', true) . '@' . $fromDomain;
 
-        Mail::html($this->toHtml($body), function ($message) use ($to, $subject, $messageId) {
+        Mail::html($this->toHtml($body), function ($message) use ($to, $subject, $body, $messageId) {
             $message->to($to)
                     ->subject($subject)
-                    ->text($this->toPlain($subject))
+                    ->text($this->toPlain($body))
                     ->getHeaders()
-                    ->addTextHeader('Message-ID', $messageId);
+                    ->addIdHeader('Message-ID', $messageId);
         });
 
-        return $messageId;
+        return '<' . $messageId . '>';
     }
 
     // ─── Private ───────────────────────────────────────────

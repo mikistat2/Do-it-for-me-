@@ -49,15 +49,17 @@ class DraftController extends Controller
     public function update(Request $request, string $id): JsonResponse
     {
         $data = $request->validate([
-            'subject' => 'sometimes|string|min:1|max:255',
-            'body'    => 'sometimes|string|min:1|max:20000',
-            'toEmail' => 'sometimes|email',
+            'subject'    => 'sometimes|string|min:1|max:255',
+            'body'       => 'sometimes|string|min:1|max:20000',
+            'toEmail'    => 'sometimes|nullable|email',
+            'toTelegram' => ['sometimes', 'nullable', 'string', 'regex:/^@?[A-Za-z][A-Za-z0-9_]{3,31}$/'],
         ]);
 
         $mapped = array_filter([
-            'subject'  => $data['subject']  ?? null,
-            'body'     => $data['body']     ?? null,
-            'to_email' => $data['toEmail']  ?? null,
+            'subject'     => $data['subject']  ?? null,
+            'body'        => $data['body']     ?? null,
+            'to_email'    => $data['toEmail']  ?? null,
+            'to_telegram' => isset($data['toTelegram']) ? ltrim($data['toTelegram'], '@') : null,
         ], fn($v) => $v !== null);
 
         $draft = $this->draftService->update($request->user()->id, $id, $mapped);

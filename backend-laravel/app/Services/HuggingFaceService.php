@@ -9,19 +9,23 @@ use Illuminate\Support\Facades\Log;
  * Centralized wrapper for the HuggingFace Inference API.
  *
  * Every AI call in the app (matching, email generation, etc.) goes through
- * this service so we have one place to configure the model, handle retries
- * for the "model is loading" 503 responses, and extract structured JSON.
+ * this service so we have one place to configure the model, handle retries,
+ * and extract structured JSON.
+ *
+ * Uses the OpenAI-compatible chat completions endpoint on
+ * router.huggingface.co — the old api-inference.huggingface.co endpoint
+ * was shut down and always fails.
  */
 class HuggingFaceService
 {
     private string $token;
     private string $model;
-    private string $baseUrl = 'https://api-inference.huggingface.co/models/';
+    private string $endpoint = 'https://router.huggingface.co/v1/chat/completions';
 
     public function __construct()
     {
         $this->token = (string) config('app.hf_token', '');
-        $this->model = (string) config('app.hf_model', 'mistralai/Mistral-7B-Instruct-v0.3');
+        $this->model = (string) config('app.hf_model', 'meta-llama/Llama-3.1-8B-Instruct');
     }
 
     /**
@@ -33,7 +37,7 @@ class HuggingFaceService
     }
 
     /**
-     * Send a text-generation completion request.
+     * Send a chat completion request.
      *
      * @param  string  $systemPrompt  The system instruction (role context)
      * @param  string  $userPrompt    The user-provided data/question
@@ -51,40 +55,27 @@ class HuggingFaceService
             return null;
         }
 
-        $input = "<s>[INST] {$systemPrompt}\n\n{$userPrompt} [/INST]";
+        $payload = [
+            'model' => $this->model,
+            'messages' => [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $userPrompt],
+            ],
+            'max_tokens' => $maxTokens,
+            'temperature' => $temperature,
+        ];
 
         $maxAttempts = 3;
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             try {
                 $response = Http::withToken($this->token)
-                    ->timeout(60)
-                    ->post($this->baseUrl . $this->model, [
-                        'inputs'     => $input,
-                        'parameters' => [
-                            'max_new_tokens' => $maxTokens,
-                            'temperature'    => $temperature,
-                            'return_full_text' => false,
-                        ],
-                    ]);
+                    ->timeout(90)
+                    ->post($this->endpoint, $payload);
 
-                // Model is still loading — wait and retry
-                if ($response->status() === 503) {
-                    $wait = $response->json('estimated_time', 20);
-                    $wait = min((int) ceil($wait), 30);
-
-                    Log::info("HuggingFace: model loading, waiting {$wait}s (attempt {$attempt}/{$maxAttempts})");
-
-                    if ($attempt < $maxAttempts) {
-                        sleep($wait);
-                        continue;
-                    }
-                    return null;
-                }
-
-                // Rate limited
-                if ($response->status() === 429) {
-                    Log::warning('HuggingFace: rate limited');
+                // Model loading or rate limited — wait and retry
+                if (in_array($response->status(), [429, 503])) {
+                    Log::warning("HuggingFace: status {$response->status()}, retrying (attempt {$attempt}/{$maxAttempts})");
                     if ($attempt < $maxAttempts) {
                         sleep(5 * $attempt);
                         continue;
@@ -97,14 +88,23 @@ class HuggingFaceService
                         'status' => $response->status(),
                         'body'   => substr($response->body(), 0, 500),
                     ]);
+
+                    // Retry on server errors (5xx)
+                    if ($response->status() >= 500 && $attempt < $maxAttempts) {
+                        sleep(3 * $attempt);
+                        continue;
+                    }
+
                     return null;
                 }
 
-                $text = $response->json('0.generated_text') ?? '';
+                $text = $response->json('choices.0.message.content');
 
-                // Some models repeat the prompt — strip it if present
-                if (str_contains($text, '[/INST]')) {
-                    $text = preg_replace('/^.*?\[\/INST\]/s', '', $text);
+                if (!is_string($text) || $text === '') {
+                    Log::warning('HuggingFace: empty completion', [
+                        'body' => substr($response->body(), 0, 500),
+                    ]);
+                    return null;
                 }
 
                 return trim($text);
@@ -141,7 +141,18 @@ class HuggingFaceService
             return null;
         }
 
-        return $this->extractJson($text);
+        $result = $this->extractJson($text);
+
+        // If JSON extraction failed, try once more with a lower temperature for more deterministic output
+        if (!$result) {
+            Log::info('HuggingFace: JSON extraction failed, retrying with lower temperature');
+            $text = $this->complete($systemPrompt, $userPrompt, $maxTokens, max(0.05, $temperature - 0.10));
+            if ($text) {
+                $result = $this->extractJson($text);
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -149,15 +160,18 @@ class HuggingFaceService
      */
     public function extractJson(string $text): ?array
     {
+        // Strip any leading/trailing whitespace and control characters
+        $text = trim($text);
+
         // Try to find a JSON block delimited by ```json ... ```
-        if (preg_match('/```json\s*(\{.*?\})\s*```/s', $text, $codeBlock)) {
+        if (preg_match('/```(?:json)?\s*(\{.*?\})\s*```/s', $text, $codeBlock)) {
             $data = json_decode($codeBlock[1], true);
             if (is_array($data)) {
                 return $data;
             }
         }
 
-        // Try to find any JSON object
+        // Try to find any JSON object (handles nested braces)
         if (preg_match('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/s', $text, $matches)) {
             $data = json_decode($matches[0], true);
             if (is_array($data)) {
@@ -165,8 +179,18 @@ class HuggingFaceService
             }
         }
 
+        // Try to find JSON with nested arrays too (more permissive pattern)
+        if (preg_match('/\{.*\}/s', $text, $matches)) {
+            // Clean up common issues: trailing commas, etc.
+            $cleaned = preg_replace('/,\s*([\]}])/', '$1', $matches[0]);
+            $data = json_decode($cleaned, true);
+            if (is_array($data)) {
+                return $data;
+            }
+        }
+
         // Last resort — try the whole text
-        $data = json_decode(trim($text), true);
+        $data = json_decode($text, true);
         if (is_array($data)) {
             return $data;
         }

@@ -76,4 +76,11 @@ class ChannelController extends Controller
         $result = $this->channelService->syncHistory($request->user()->id, $id);
         return ApiResponse::success($result);
     }
+
+    /** POST /channels/sync-all */
+    public function syncAll(Request $request): JsonResponse
+    {
+        $result = $this->channelService->syncAllForUser($request->user()->id);
+        return ApiResponse::success($result);
+    }
 }

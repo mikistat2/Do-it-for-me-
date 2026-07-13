@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\SyncUserChannelsJob;
 use App\Models\User;
 use App\Repositories\UserRepository;
 use App\Repositories\RefreshTokenRepository;
@@ -117,6 +118,9 @@ class AuthService
         }
 
         $tokens = $this->tokenService->issueTokenPair($user);
+
+        // Auto-sync the user's Telegram channels in the background
+        SyncUserChannelsJob::dispatch($user->id);
 
         return [
             'user'         => $this->toPublicUser($user),

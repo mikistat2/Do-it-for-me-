@@ -9,25 +9,63 @@ use Illuminate\Support\Facades\Log;
 class MatchingService
 {
     private const SYSTEM_INSTRUCTION = <<<EOT
-You are an expert technical recruiter AI. Your task is to compare a candidate's profile against a job posting and evaluate their fit.
+You are a world-class technical recruiter AI. Your job is to meticulously compare a candidate's FULL profile against a job posting and produce a rigorous match evaluation.
+
+IMPORTANT RULES:
+- You MUST score EVERY job, even if it has no contact email, no phone number, or incomplete information.
+- Missing contact info (email/phone) must NOT affect the match score at all.
+- Handle multilingual job posts (English, Amharic, mixed languages) equally and fairly.
+- Extract meaning from the job description even if the format is non-standard.
+
+SCORING METHODOLOGY — evaluate ALL of the following dimensions:
+
+1. SKILL MATCH (0-35 points)
+   - Count how many of the job's required/preferred skills the candidate possesses.
+   - Award partial credit for related/adjacent skills (e.g. React ≈ Vue, Python ≈ Django).
+   - Consider skills from the resume text that may not be listed explicitly in the skills array.
+   - If the job doesn't list specific skills, infer from the job title and description.
+
+2. ROLE & TITLE FIT (0-20 points)
+   - Does the candidate's preferred roles list align with this job title?
+   - Does the resume indicate experience in this kind of role?
+   - Award full marks if the candidate's career trajectory points toward this role.
+
+3. EXPERIENCE LEVEL (0-15 points)
+   - Compare the job's required experience with clues in the resume.
+   - A junior applying for a senior role should lose points; over-qualified is a minor penalty.
+   - If experience requirements are unclear, award 8 (slight benefit of the doubt).
+
+4. LOCATION & REMOTE FIT (0-10 points)
+   - Remote jobs should get full marks if the candidate is open to remote.
+   - Compare the candidate's preferred locations with the job's location.
+   - If location info is missing on either side, award 5 (neutral).
+
+5. SALARY ALIGNMENT (0-10 points)
+   - If both salaries are known, check if the job meets/exceeds expectations.
+   - If salary data is missing on either side, award 5 (neutral).
+
+6. PORTFOLIO & ONLINE PRESENCE (0-10 points)
+   - Bonus points if the candidate has a portfolio, GitHub, or LinkedIn URL.
+   - These demonstrate professionalism and verifiable work.
+
+FINAL SCORE = sum of all dimensions (0-100).
+
+RECOMMENDATION RULES:
+- 85-100 → STRONG_APPLY  (excellent fit, auto-apply worthy)
+- 70-84  → APPLY          (good fit, worth applying)
+- 50-69  → CONSIDER       (partial fit, review manually)
+- 0-49   → SKIP           (poor fit)
 
 You MUST return ONLY a valid JSON object with exactly these keys:
 {
   "score": <integer 0-100>,
-  "strengths": ["<short strength 1>", "<short strength 2>", ...],
-  "weaknesses": ["<short weakness 1>", "<short weakness 2>", ...],
+  "strengths": ["<strength 1>", "<strength 2>", ...],
+  "weaknesses": ["<weakness 1>", "<weakness 2>", ...],
   "reason": "<one concise paragraph explaining the score>",
   "recommendation": "<one of: STRONG_APPLY, APPLY, CONSIDER, SKIP>"
 }
 
-Scoring guidelines:
-- 85-100: Strong match — most required skills present, relevant experience
-- 70-84:  Good match — many skills overlap, some gaps
-- 50-69:  Moderate — partial skill overlap, could be worth trying
-- 30-49:  Weak — significant skill gaps, unlikely fit
-- 0-29:   Poor — almost no overlap
-
-Return ONLY the JSON object. No markdown, no explanation outside the JSON.
+Return ONLY the JSON. No markdown, no extra text, no explanation outside the JSON.
 EOT;
 
     public function __construct(
@@ -36,120 +74,249 @@ EOT;
 
     public function analyze(Job $job, Profile $profile, array $jobSkills): array
     {
-        // Always compute the local score first — it's free and instant
-        $localResult = $this->localScore($job, $profile, $jobSkills);
-
-        // Try AI scoring if HuggingFace is configured
+        // Always attempt AI scoring when HuggingFace is configured
         if ($this->hf->isConfigured()) {
-            try {
-                $prompt = $this->buildPrompt($job, $profile, $jobSkills);
-                $aiResult = $this->hf->completeJson(
-                    self::SYSTEM_INSTRUCTION,
-                    $prompt,
-                    maxTokens: 500,
-                    temperature: 0.2,
-                );
+            $prompt = $this->buildPrompt($job, $profile, $jobSkills);
 
-                if ($aiResult && isset($aiResult['score'], $aiResult['recommendation'])) {
-                    Log::info('MatchingService: AI scoring succeeded', [
-                        'jobId' => $job->id,
-                        'aiScore' => $aiResult['score'],
-                    ]);
+            // First attempt
+            $aiResult = $this->tryAiScoring($prompt, 0.15, 'primary');
 
-                    return [
-                        'score'          => max(0, min(100, (int) $aiResult['score'])),
-                        'strengths'      => (array) ($aiResult['strengths'] ?? []),
-                        'weaknesses'     => (array) ($aiResult['weaknesses'] ?? []),
-                        'reason'         => (string) ($aiResult['reason'] ?? ''),
-                        'recommendation' => (string) $aiResult['recommendation'],
-                    ];
-                }
-
-                Log::info('MatchingService: AI returned invalid JSON, using local score');
-            } catch (\Throwable $e) {
-                Log::warning('MatchingService: AI scoring failed, using local score', [
-                    'error' => $e->getMessage(),
-                ]);
+            // If first attempt fails, retry with slightly different temperature
+            if (!$aiResult) {
+                Log::info('MatchingService: Retrying AI scoring with adjusted parameters');
+                $aiResult = $this->tryAiScoring($prompt, 0.10, 'retry');
             }
+
+            if ($aiResult) {
+                Log::info('MatchingService: AI scoring succeeded', [
+                    'jobId'   => $job->id,
+                    'aiScore' => $aiResult['score'],
+                    'hasEmail' => !empty($job->contact_email),
+                ]);
+
+                return [
+                    'score'          => max(0, min(100, (int) $aiResult['score'])),
+                    'strengths'      => (array) ($aiResult['strengths'] ?? []),
+                    'weaknesses'     => (array) ($aiResult['weaknesses'] ?? []),
+                    'reason'         => (string) ($aiResult['reason'] ?? ''),
+                    'recommendation' => (string) $aiResult['recommendation'],
+                ];
+            }
+
+            Log::warning('MatchingService: AI scoring failed after retries, falling back to local scoring', [
+                'jobId' => $job->id,
+            ]);
         }
 
-        // Return the smart local score (not a dumb fallback)
-        return $localResult;
+        // Fallback to local scoring only when HF is not configured or all retries failed
+        return $this->localScore($job, $profile, $jobSkills);
+    }
+
+    /**
+     * Attempt AI scoring with the given temperature.
+     */
+    private function tryAiScoring(string $prompt, float $temperature, string $label): ?array
+    {
+        try {
+            $aiResult = $this->hf->completeJson(
+                self::SYSTEM_INSTRUCTION,
+                $prompt,
+                maxTokens: 600,
+                temperature: $temperature,
+            );
+
+            if ($aiResult && isset($aiResult['score'], $aiResult['recommendation'])) {
+                // Validate the recommendation value
+                $validRecs = ['STRONG_APPLY', 'APPLY', 'CONSIDER', 'SKIP'];
+                if (!in_array(strtoupper($aiResult['recommendation']), $validRecs)) {
+                    $aiResult['recommendation'] = $this->deriveRecommendation((int) $aiResult['score']);
+                } else {
+                    $aiResult['recommendation'] = strtoupper($aiResult['recommendation']);
+                }
+                return $aiResult;
+            }
+
+            Log::warning("MatchingService: AI {$label} attempt returned invalid JSON");
+        } catch (\Throwable $e) {
+            Log::warning("MatchingService: AI {$label} attempt failed", [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Derive recommendation from score (used when AI returns invalid recommendation string).
+     */
+    private function deriveRecommendation(int $score): string
+    {
+        return match (true) {
+            $score >= 85 => 'STRONG_APPLY',
+            $score >= 70 => 'APPLY',
+            $score >= 50 => 'CONSIDER',
+            default      => 'SKIP',
+        };
     }
 
     private function buildPrompt(Job $job, Profile $profile, array $jobSkills): string
     {
-        $profileSkills = is_array($profile->skills) ? implode(', ', $profile->skills) : 'n/a';
-        $prefRoles = is_array($profile->preferred_roles) ? implode(', ', $profile->preferred_roles) : 'n/a';
-        $prefLocs = is_array($profile->preferred_locations) ? implode(', ', $profile->preferred_locations) : 'n/a';
-        $expSalary = $profile->expected_salary ?? 'n/a';
-        $resume = $profile->resume_text ?? 'n/a';
+        $profileSkills = is_array($profile->skills) ? implode(', ', $profile->skills) : 'none listed';
+        $prefRoles = is_array($profile->preferred_roles) ? implode(', ', $profile->preferred_roles) : 'none listed';
+        $prefLocs = is_array($profile->preferred_locations) ? implode(', ', $profile->preferred_locations) : 'none listed';
+        $expSalary = $profile->expected_salary ? number_format($profile->expected_salary) : 'not specified';
+        $resume = !empty($profile->resume_text) ? $profile->resume_text : 'No resume provided';
+        // Truncate resume to save tokens, but give enough context
+        if (strlen($resume) > 4000) {
+            $resume = substr($resume, 0, 4000) . '... [truncated]';
+        }
 
-        $jCompany = $job->company ?? 'n/a';
-        $jExp = $job->experience ?? 'n/a';
-        $jSalary = $job->salary ?? 'n/a';
-        $reqSkills = implode(', ', $jobSkills) ?: 'n/a';
+        $portfolio = $profile->portfolio ?? 'none';
+        $linkedin = $profile->linkedin ?? 'none';
+        $github = $profile->github ?? 'none';
+        $email = $profile->email ?? 'none';
+        $phone = $profile->phone ?? 'none';
+
+        $jCompany = $job->company ?? 'not specified';
+        $jExp = $job->experience ?? 'not specified';
+        $jSalary = $job->salary ?? 'not specified';
+        $reqSkills = !empty($jobSkills) ? implode(', ', $jobSkills) : 'none explicitly listed';
+        $jDescription = $job->description ?? '';
+        if (strlen($jDescription) > 4000) {
+            $jDescription = substr($jDescription, 0, 4000) . '... [truncated]';
+        }
+
+        $contactEmail = $job->contact_email ?? 'not provided';
+        $contactPhone = $job->contact_phone ?? 'not provided';
 
         return <<<PROMPT
-CANDIDATE PROFILE
-Name: {$profile->full_name}
-Skills: {$profileSkills}
-Preferred roles: {$prefRoles}
-Preferred locations: {$prefLocs}
-Expected salary: {$expSalary}
-Resume excerpt: {$resume}
+═══════════════════════════════════════════
+CANDIDATE PROFILE — Evaluate carefully
+═══════════════════════════════════════════
+Full Name: {$profile->full_name}
+Email: {$email}
+Phone: {$phone}
+Portfolio: {$portfolio}
+LinkedIn: {$linkedin}
+GitHub: {$github}
 
-JOB POSTING
+Listed Skills: {$profileSkills}
+Preferred Roles: {$prefRoles}
+Preferred Locations: {$prefLocs}
+Expected Salary: {$expSalary}
+
+Resume / Experience:
+{$resume}
+
+═══════════════════════════════════════════
+JOB POSTING — Compare against the candidate
+═══════════════════════════════════════════
 Title: {$job->title}
 Company: {$jCompany}
-Experience required: {$jExp}
-Salary: {$jSalary}
-Remote type: {$job->remote_type}
-Required skills: {$reqSkills}
-Description: {$job->description}
+Experience Required: {$jExp}
+Salary Offered: {$jSalary}
+Remote Type: {$job->remote_type}
+Required Skills: {$reqSkills}
+Contact Email: {$contactEmail}
+Contact Phone: {$contactPhone}
+
+Description:
+{$jDescription}
+
+═══════════════════════════════════════════
+TASK: Score this candidate for this job using all 6 dimensions described in your instructions.
+NOTE: The presence or absence of contact email/phone in the job posting must NOT affect the score.
+Score purely on skill match, role fit, experience, location, salary, and portfolio.
 PROMPT;
     }
 
     // ─── Smart Local Scoring ──────────────────────────────────────────────
-    // Instead of returning a flat 50, this method calculates a real score
-    // based on skill overlap, role/title match, location, and salary fit.
+    // Mirrors the 6-dimension AI scoring rubric so local and AI scores
+    // are on the same scale and produce comparable results.
 
     private function localScore(Job $job, Profile $profile, array $jobSkills): array
     {
         $strengths = [];
         $weaknesses = [];
         $score = 0;
-        $maxScore = 0;
 
-        // ── 1. Skill overlap (50 points max) ──────────────────────────
+        // ── 1. Skill Match (0-35 points) ─────────────────────────────
         $profileSkills = is_array($profile->skills) ? array_map('strtolower', $profile->skills) : [];
 
         if (!empty($jobSkills) && !empty($profileSkills)) {
-            $maxScore += 50;
             $jobSkillsLower = array_map('strtolower', $jobSkills);
             $matched = array_intersect($profileSkills, $jobSkillsLower);
             $missing = array_diff($jobSkillsLower, $profileSkills);
 
-            $ratio = count($matched) / max(count($jobSkillsLower), 1);
-            $score += (int) round($ratio * 50);
+            // Also check for adjacent/related skills
+            $adjacentMap = [
+                'react' => ['vue', 'angular', 'svelte', 'next.js'],
+                'vue' => ['react', 'angular', 'svelte', 'nuxt'],
+                'angular' => ['react', 'vue', 'typescript'],
+                'python' => ['django', 'flask', 'fastapi'],
+                'django' => ['python', 'flask'],
+                'node' => ['node.js', 'express', 'nestjs', 'javascript'],
+                'node.js' => ['node', 'express', 'nestjs', 'javascript'],
+                'javascript' => ['typescript', 'node', 'node.js', 'react', 'vue'],
+                'typescript' => ['javascript', 'angular', 'node.js'],
+                'php' => ['laravel', 'symfony'],
+                'laravel' => ['php', 'symfony'],
+                'java' => ['spring', 'kotlin'],
+                'spring' => ['java', 'kotlin'],
+                'postgresql' => ['mysql', 'sql'],
+                'mysql' => ['postgresql', 'sql'],
+                'sql' => ['postgresql', 'mysql'],
+                'aws' => ['gcp', 'azure'],
+                'gcp' => ['aws', 'azure'],
+                'azure' => ['aws', 'gcp'],
+                'docker' => ['kubernetes'],
+                'kubernetes' => ['docker'],
+                'c#' => ['.net'],
+                '.net' => ['c#'],
+                'flutter' => ['dart', 'kotlin', 'swift'],
+            ];
+
+            $adjacentHits = 0;
+            foreach ($missing as $missingSkill) {
+                $related = $adjacentMap[$missingSkill] ?? [];
+                foreach ($related as $adj) {
+                    if (in_array($adj, $profileSkills)) {
+                        $adjacentHits++;
+                        break;
+                    }
+                }
+            }
+
+            $directRatio = count($matched) / max(count($jobSkillsLower), 1);
+            $adjacentBonus = $adjacentHits * 0.5 / max(count($jobSkillsLower), 1);
+            $totalRatio = min(1.0, $directRatio + $adjacentBonus);
+
+            $skillPoints = (int) round($totalRatio * 35);
+            $score += $skillPoints;
 
             if (count($matched) > 0) {
                 $strengths[] = 'Skills match: ' . implode(', ', array_slice(array_values($matched), 0, 5));
             }
-            if (count($missing) > 0) {
-                $weaknesses[] = 'Missing skills: ' . implode(', ', array_slice(array_values($missing), 0, 5));
+            if ($adjacentHits > 0) {
+                $strengths[] = 'Has related/adjacent skills';
+            }
+            if (count($missing) > $adjacentHits) {
+                $reallyMissing = array_diff(array_values($missing), array_keys(array_filter(
+                    $adjacentMap,
+                    fn($related) => !empty(array_intersect($related, $profileSkills)),
+                    ARRAY_FILTER_USE_BOTH
+                )));
+                if (!empty($reallyMissing)) {
+                    $weaknesses[] = 'Missing skills: ' . implode(', ', array_slice(array_values($reallyMissing), 0, 5));
+                }
             }
         } elseif (empty($jobSkills)) {
-            // No job skills listed — give partial credit
-            $maxScore += 50;
-            $score += 25;
+            $score += 18; // No job skills listed — partial credit
         } else {
-            $maxScore += 50;
             $weaknesses[] = 'Profile has no skills listed';
         }
 
-        // ── 2. Title / Role match (20 points max) ────────────────────
-        $maxScore += 20;
+        // ── 2. Role & Title Fit (0-20 points) ────────────────────────
         $preferredRoles = is_array($profile->preferred_roles) ? array_map('strtolower', $profile->preferred_roles) : [];
         $jobTitleLower = strtolower($job->title ?? '');
 
@@ -160,7 +327,7 @@ PROMPT;
                     $roleMatch = true;
                     break;
                 }
-                // Fuzzy: check if any word from the role appears in the title
+                // Fuzzy: check if significant words overlap
                 $roleWords = explode(' ', $role);
                 foreach ($roleWords as $word) {
                     if (strlen($word) >= 4 && str_contains($jobTitleLower, $word)) {
@@ -173,20 +340,52 @@ PROMPT;
                 $score += 20;
                 $strengths[] = 'Job title matches preferred roles';
             } else {
-                $score += 5; // partial credit
-                $weaknesses[] = 'Job title does not closely match preferred roles';
+                $score += 5;
+                $weaknesses[] = 'Job title doesn\'t closely match preferred roles';
             }
         } else {
             $score += 10; // neutral if no preferences set
         }
 
-        // ── 3. Location match (15 points max) ────────────────────────
-        $maxScore += 15;
+        // ── 3. Experience Level (0-15 points) ────────────────────────
+        $hasResume = !empty($profile->resume_text) && strlen($profile->resume_text) > 50;
+        $jobExp = $job->experience ?? '';
+
+        if ($hasResume) {
+            // Check if resume mentions years of experience
+            $resumeLower = strtolower($profile->resume_text);
+            $hasExpMention = preg_match('/(\d+)\+?\s*(?:years?|yrs?)/', $resumeLower, $expMatch);
+
+            if ($hasExpMention && !empty($jobExp)) {
+                $candidateYears = (int) $expMatch[1];
+                $jobYearsMatch = preg_match('/(\d+)/', $jobExp, $jobExpMatch);
+                $jobYears = $jobYearsMatch ? (int) $jobExpMatch[1] : 0;
+
+                if ($jobYears > 0 && $candidateYears >= $jobYears) {
+                    $score += 15;
+                    $strengths[] = "Has {$candidateYears}+ years experience (job requires {$jobYears})";
+                } elseif ($jobYears > 0 && $candidateYears >= $jobYears - 1) {
+                    $score += 10;
+                    $strengths[] = 'Experience is close to requirements';
+                } else {
+                    $score += 5;
+                    $weaknesses[] = 'May lack required experience level';
+                }
+            } else {
+                $score += 10; // has resume but can't compare
+                $strengths[] = 'Resume provided';
+            }
+        } else {
+            $score += 5; // no resume
+            $weaknesses[] = 'No resume text to evaluate experience';
+        }
+
+        // ── 4. Location & Remote Fit (0-10 points) ───────────────────
         $preferredLocations = is_array($profile->preferred_locations) ? array_map('strtolower', $profile->preferred_locations) : [];
         $remoteType = strtoupper($job->remote_type ?? 'UNKNOWN');
 
         if ($remoteType === 'REMOTE') {
-            $score += 15;
+            $score += 10;
             $strengths[] = 'Remote position — location flexible';
         } elseif (!empty($preferredLocations)) {
             $jobLocations = $job->locations()->pluck('name')->map(fn($l) => strtolower($l))->toArray();
@@ -200,58 +399,76 @@ PROMPT;
                 }
             }
             if ($locMatch) {
-                $score += 15;
+                $score += 10;
                 $strengths[] = 'Job location matches preferences';
             } else {
                 $score += 3;
-                $weaknesses[] = 'Job location may not match preferred locations';
+                $weaknesses[] = 'Job location may not match preferences';
             }
         } else {
-            $score += 8; // neutral
+            $score += 5; // neutral
         }
 
-        // ── 4. Salary fit (15 points max) ─────────────────────────────
-        $maxScore += 15;
+        // ── 5. Salary Alignment (0-10 points) ────────────────────────
         $expectedSalary = $profile->expected_salary;
         $jobSalary = $job->salary;
 
         if ($expectedSalary && $jobSalary) {
-            // Try to extract a number from the job salary string
             $jobSalaryNum = $this->extractSalaryNumber($jobSalary);
             if ($jobSalaryNum > 0) {
                 if ($jobSalaryNum >= $expectedSalary) {
-                    $score += 15;
+                    $score += 10;
                     $strengths[] = 'Salary meets or exceeds expectations';
                 } elseif ($jobSalaryNum >= $expectedSalary * 0.8) {
-                    $score += 10;
+                    $score += 7;
                     $strengths[] = 'Salary is close to expectations';
                 } else {
-                    $score += 3;
+                    $score += 2;
                     $weaknesses[] = 'Salary may be below expectations';
                 }
             } else {
-                $score += 8; // can't parse — neutral
+                $score += 5;
             }
         } else {
-            $score += 8; // not enough data — neutral
+            $score += 5; // not enough data — neutral
         }
 
-        // ── Normalize to 0-100 ───────────────────────────────────────
-        $normalizedScore = $maxScore > 0 ? (int) round(($score / $maxScore) * 100) : 50;
-        $normalizedScore = max(0, min(100, $normalizedScore));
+        // ── 6. Portfolio & Online Presence (0-10 points) ─────────────
+        $presencePoints = 0;
+        $presenceItems = [];
+
+        if (!empty($profile->portfolio)) {
+            $presencePoints += 4;
+            $presenceItems[] = 'portfolio';
+        }
+        if (!empty($profile->github)) {
+            $presencePoints += 3;
+            $presenceItems[] = 'GitHub';
+        }
+        if (!empty($profile->linkedin)) {
+            $presencePoints += 3;
+            $presenceItems[] = 'LinkedIn';
+        }
+
+        $presencePoints = min(10, $presencePoints);
+        $score += $presencePoints;
+
+        if (!empty($presenceItems)) {
+            $strengths[] = 'Online presence: ' . implode(', ', $presenceItems);
+        } elseif ($presencePoints === 0) {
+            $weaknesses[] = 'No portfolio, GitHub, or LinkedIn linked';
+        }
+
+        // ── Final score (already 0-100 from the 6 dimensions) ────────
+        $normalizedScore = max(0, min(100, $score));
 
         // ── Derive recommendation ────────────────────────────────────
-        $recommendation = match (true) {
-            $normalizedScore >= 85 => 'STRONG_APPLY',
-            $normalizedScore >= 70 => 'APPLY',
-            $normalizedScore >= 50 => 'CONSIDER',
-            default                => 'SKIP',
-        };
+        $recommendation = $this->deriveRecommendation($normalizedScore);
 
         // Build reason
         $reason = "Local analysis: score {$normalizedScore}/100. ";
         if (!empty($strengths)) {
-            $reason .= 'Strengths include ' . strtolower(implode('; ', array_slice($strengths, 0, 3))) . '. ';
+            $reason .= 'Strengths include ' . strtolower(implode('; ', array_slice($strengths, 0, 4))) . '. ';
         }
         if (!empty($weaknesses)) {
             $reason .= 'Areas of concern: ' . strtolower(implode('; ', array_slice($weaknesses, 0, 3))) . '.';
@@ -271,17 +488,17 @@ PROMPT;
      */
     private function extractSalaryNumber(string $salary): int
     {
+        // If it looks like "50k" => multiply
+        if (preg_match('/(\d+)\s*k\b/i', $salary, $km)) {
+            return (int) $km[1] * 1000;
+        }
+
         // Remove currency symbols, commas, spaces
         $clean = preg_replace('/[^0-9.\-]/', ' ', $salary);
 
         // Look for numbers — take the first reasonable one
         if (preg_match('/(\d[\d,]*(?:\.\d+)?)/', $clean, $m)) {
-            $num = (int) str_replace([',', '.'], '', $m[1]);
-            // If it looks like "50k" => multiply
-            if (preg_match('/(\d+)\s*k\b/i', $salary, $km)) {
-                return (int) $km[1] * 1000;
-            }
-            return $num;
+            return (int) str_replace([',', '.'], '', $m[1]);
         }
 
         return 0;
