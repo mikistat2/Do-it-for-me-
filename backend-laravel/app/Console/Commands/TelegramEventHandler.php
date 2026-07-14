@@ -75,6 +75,7 @@ use danog\MadelineProto\EventHandler;
                     'channelId' => $channel->id,
                     'telegramMsgId' => (string) $msgId,
                     'rawText' => $text,
+                    'replyMarkup' => $message['reply_markup'] ?? null,
                     'senderId' => $senderId ? (string) $senderId : null,
                     'messageDate' => $date,
                 ]);

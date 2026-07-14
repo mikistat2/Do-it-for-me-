@@ -111,7 +111,66 @@ class JobDetectorService
     private const TELEGRAM_TAG_DENYLIST = [
         'freelance_ethio', 'afriwork', 'afriworket', 'ethiojobs', 'ethio_jobs',
         'effoyjobs', 'effoy_jobs', 'fanajobs', 'fana_jobs', 'maroset',
+        'afriworkamharic',
     ];
+
+    /**
+     * Matches Telegram bot deep links: t.me/SomeBot?start=payload or
+     * t.me/SomeBot/appname?startapp=payload (Mini App direct links).
+     */
+    private const APPLY_LINK_REGEX = '~(?:https?://)?t(?:elegram)?\.me/([A-Za-z][A-Za-z0-9_]{3,31})(?:/[A-Za-z0-9_]+)?\?(?:start|startapp)=([\w-]+)~i';
+
+    /**
+     * Extract a Telegram bot application deep link — the "View Details /
+     * Apply" button many job channels (Afriwork etc.) attach to posts.
+     *
+     * Checks the message's inline keyboard buttons first, then falls back
+     * to deep links written in the post text. Only links carrying a
+     * start/startapp payload count — a bare channel link is not an apply
+     * button.
+     */
+    public function extractApplyUrl(string $text, ?array $replyMarkup = null): ?string
+    {
+        // 1. Inline keyboard buttons (replyInlineMarkup → rows → buttons)
+        foreach (($replyMarkup['rows'] ?? []) as $row) {
+            foreach (($row['buttons'] ?? []) as $button) {
+                $url = $button['url'] ?? null;
+                if ($url && preg_match(self::APPLY_LINK_REGEX, $url)) {
+                    return $this->normalizeApplyUrl($url);
+                }
+            }
+        }
+
+        // 2. Deep links inside the post text
+        if (preg_match(self::APPLY_LINK_REGEX, $text, $m)) {
+            return $this->normalizeApplyUrl($m[0]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Split an apply deep link into its bot username and start payload.
+     * Returns null for startapp (Mini App) links — those can only be
+     * opened by the user, not pre-launched server-side.
+     *
+     * @return array{bot: string, param: string}|null
+     */
+    public function parseStartBotLink(string $url): ?array
+    {
+        if (preg_match('~(?:https?://)?t(?:elegram)?\.me/([A-Za-z][A-Za-z0-9_]{3,31})\?start=([\w-]+)~i', $url, $m)) {
+            return ['bot' => $m[1], 'param' => $m[2]];
+        }
+        return null;
+    }
+
+    private function normalizeApplyUrl(string $url): string
+    {
+        if (!preg_match('~^https?://~i', $url)) {
+            $url = 'https://' . $url;
+        }
+        return substr($url, 0, 500);
+    }
 
     private function detectTelegramContact(string $text): ?string
     {
@@ -150,7 +209,15 @@ class JobDetectorService
 
     private function isUsableTelegramHandle(string $handle): bool
     {
-        return !in_array(strtolower($handle), self::TELEGRAM_TAG_DENYLIST, true);
+        $lower = strtolower($handle);
+
+        // Bot accounts can't receive a free-text application email — bot
+        // application flows are handled through the apply_url deep link.
+        if (str_ends_with($lower, 'bot')) {
+            return false;
+        }
+
+        return !in_array($lower, self::TELEGRAM_TAG_DENYLIST, true);
     }
 
     private function detectRemoteType(string $lower): string

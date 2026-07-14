@@ -21,6 +21,7 @@ class Job extends Model
         'contact_email',
         'contact_phone',
         'contact_telegram',
+        'apply_url',
         'experience',
         'salary',
         'remote_type',

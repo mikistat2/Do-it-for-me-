@@ -129,6 +129,7 @@ export interface Job {
   contactEmail?: string | null;
   contactPhone?: string | null;
   contactTelegram?: string | null;
+  applyUrl?: string | null;
   experience?: string | null;
   salary?: string | null;
   remoteType: RemoteType;

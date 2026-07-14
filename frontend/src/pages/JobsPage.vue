@@ -85,9 +85,7 @@
             <span class="text-slate-500">Telegram:</span>
             <a
               v-if="selected.contactTelegram"
-              :href="`https://t.me/${selected.contactTelegram}`"
-              target="_blank"
-              rel="noopener"
+              :href="`tg://resolve?domain=${selected.contactTelegram}`"
               class="text-brand-600 hover:underline dark:text-brand-400"
               v-text="'@' + selected.contactTelegram"
             ></a>
@@ -137,9 +135,31 @@
           <p class="whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300" v-text="selected.description"></p>
         </div>
 
+        <div
+          v-if="selected.applyUrl"
+          class="rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm dark:border-brand-900 dark:bg-brand-900/20"
+        >
+          <p class="mb-2 text-slate-600 dark:text-slate-300">
+            This channel uses a Telegram application bot. Open it, then paste your
+            draft text and tap Apply there.
+          </p>
+          <div class="flex flex-wrap items-center gap-3">
+            <a
+              :href="toTgDeepLink(selected.applyUrl)"
+              class="btn-primary inline-block"
+            >Apply via Telegram bot ↗</a>
+            <a
+              :href="selected.applyUrl"
+              target="_blank"
+              rel="noopener"
+              class="text-xs text-slate-500 hover:underline"
+            >app didn't open? try t.me link</a>
+          </div>
+        </div>
+
         <div class="flex items-center justify-end gap-2">
           <span
-            v-if="!selected.contactEmail && !selected.contactTelegram"
+            v-if="!selected.contactEmail && !selected.contactTelegram && !selected.applyUrl"
             class="text-xs text-slate-400"
           >No contact email or Telegram found</span>
           <button
@@ -181,6 +201,21 @@ const sortBy = ref('createdAt');
 const modalOpen = ref(false);
 const selected = ref<Job | null>(null);
 const sending = ref(false);
+
+// Convert a t.me link to a tg:// deep link that opens the Telegram app
+// directly — t.me (the website) is unreachable on some networks even
+// when the Telegram app itself works.
+const toTgDeepLink = (url: string): string => {
+  const m = url.match(
+    /t(?:elegram)?\.me\/([A-Za-z][A-Za-z0-9_]{3,31})(?:\/([A-Za-z0-9_]+))?\?(start|startapp)=([\w-]+)/i,
+  );
+  if (!m) return url;
+  const [, bot, app, kind, param] = m;
+  if (kind.toLowerCase() === 'startapp') {
+    return `tg://resolve?domain=${bot}${app ? `&appname=${app}` : ''}&startapp=${param}`;
+  }
+  return `tg://resolve?domain=${bot}&start=${param}`;
+};
 
 const sendLabel = computed((): string => {
   const job = selected.value;

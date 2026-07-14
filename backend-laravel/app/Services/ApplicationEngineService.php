@@ -25,12 +25,17 @@ class ApplicationEngineService
         private ApplicationService $applicationService,
         private EmailGenerationService $emailGenerationService,
         private NotificationService $notificationService,
+        private TelegramBotService $telegramBot,
         private LogService $logService
     ) {}
 
     public function processMessage(array $message): array
     {
         $parsed = $this->jobDetector->detectJob($message['rawText']);
+        $applyUrl = $this->jobDetector->extractApplyUrl(
+            $message['rawText'],
+            $message['replyMarkup'] ?? null,
+        );
 
         // Upsert TelegramMessage — ALWAYS store, even non-jobs
         $telegramMessage = TelegramMessage::updateOrCreate(
@@ -59,6 +64,10 @@ class ApplicationEngineService
 
         $duplicate = $this->jobRepo->findByHash($message['userId'], $parsed['contentHash']);
         if ($duplicate) {
+            // Backfill the apply link if an earlier sync missed the button
+            if ($applyUrl && empty($duplicate->apply_url)) {
+                $duplicate->update(['apply_url' => $applyUrl]);
+            }
             // If this job was stored before the user completed their profile,
             // it never got scored — score it now instead of dropping it.
             if (!$duplicate->match && $duplicate->status === 'DETECTED') {
@@ -70,7 +79,7 @@ class ApplicationEngineService
             return ['status' => 'DUPLICATE', 'jobId' => $duplicate->id];
         }
 
-        $job = DB::transaction(function () use ($parsed, $message, $telegramMessage) {
+        $job = DB::transaction(function () use ($parsed, $message, $telegramMessage, $applyUrl) {
             $job = Job::create([
                 'user_id' => $message['userId'],
                 'message_id' => $telegramMessage->id,
@@ -79,6 +88,7 @@ class ApplicationEngineService
                 'contact_email' => $parsed['email'],
                 'contact_phone' => $parsed['phone'],
                 'contact_telegram' => $parsed['telegram'],
+                'apply_url' => $applyUrl,
                 'experience' => $parsed['experience'],
                 'salary' => $parsed['salary'],
                 'remote_type' => $parsed['remoteType'],
@@ -228,16 +238,37 @@ class ApplicationEngineService
             'draftId' => $draft->id,
         ]);
 
-        // ── Notify the user that a matching job has a draft ready ──────
         $hasEmail = !empty($job->contact_email) && filter_var($job->contact_email, FILTER_VALIDATE_EMAIL);
         $hasTelegram = !empty($job->contact_telegram);
+        $hasApplyBot = !empty($job->apply_url);
+        $automationPaused = (bool) ($settings->automation_paused ?? true);
+        $autoApply = (bool) ($settings->auto_apply ?? false);
 
+        // ── Pre-launch the channel's application bot (Afriwork-style) ──
+        // Opens the bot chat with this job's payload in the user's own
+        // Telegram, so they only have to tap Apply there.
+        $botLaunched = false;
+        if ($hasApplyBot && !$automationPaused) {
+            $user = \App\Models\User::find($userId);
+            if ($user) {
+                $botLaunched = $this->telegramBot->launchApplyBot($user, $job->apply_url);
+            }
+        }
+
+        // ── Notify the user that a matching job has a draft ready ──────
         $contactNote = match (true) {
             $hasEmail && $hasTelegram => 'An application draft is ready — it can be sent by email or Telegram (@' . $job->contact_telegram . ').',
             $hasEmail                 => 'An application draft is ready for review.',
             $hasTelegram              => 'An application draft is ready — it will be sent via Telegram (@' . $job->contact_telegram . ').',
+            $hasApplyBot              => 'This job is applied to through its Telegram bot — a draft text is ready to use there.',
             default                   => 'Draft created, but no contact email or Telegram was found — add one before sending.',
         };
+
+        if ($hasApplyBot) {
+            $contactNote .= $botLaunched
+                ? ' The application bot is already open in your Telegram — tap Apply there.'
+                : ' Use the "Apply via Telegram bot" button in the job details.';
+        }
 
         $this->notificationService->create([
             'userId' => $userId,
@@ -250,8 +281,6 @@ class ApplicationEngineService
         ]);
 
         // ── Auto-apply when enabled and any contact channel exists ─────
-        $automationPaused = (bool) ($settings->automation_paused ?? true);
-        $autoApply = (bool) ($settings->auto_apply ?? false);
 
         if (!$automationPaused && $autoApply && ($hasEmail || $hasTelegram)) {
             Log::info('Pipeline Step 5: AUTO_APPLY → dispatching application', [

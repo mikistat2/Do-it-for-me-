@@ -151,6 +151,7 @@ class ChannelService
                     'channelId' => $channel->id,
                     'telegramMsgId' => (string) $msgId,
                     'rawText' => $text,
+                    'replyMarkup' => $message['reply_markup'] ?? null,
                     'senderId' => isset($message['from_id']['user_id']) ? (string) $message['from_id']['user_id'] : null,
                     'messageDate' => Carbon::createFromTimestamp($message['date'] ?? time()),
                 ]);
